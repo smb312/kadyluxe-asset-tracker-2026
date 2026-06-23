@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-paper text-ink font-body antialiased;
+    font-size: 13px;
+  }
+}
+
+@layer components {
+  /* A status chip: small mono letter, fixed height, clickable. Colors come from
+     chipClasses() in lib/assets.ts. */
+  .chip {
+    @apply font-mono text-[9.5px] font-semibold min-w-[20px] h-5 inline-flex
+      items-center justify-center rounded px-1 cursor-pointer select-none
+      leading-none;
+  }
+  .badge-count {
+    @apply font-mono text-[9.5px] text-muted ml-1 min-w-[22px];
+  }
+  /* Sticky table header cells */
+  .th {
+    @apply font-mono text-[10px] tracking-[0.07em] uppercase text-muted
+      text-left px-2 py-2 border-b-2 border-line whitespace-nowrap bg-paper;
+  }
+  .th-sort {
+    @apply cursor-pointer hover:text-ink;
+  }
+}

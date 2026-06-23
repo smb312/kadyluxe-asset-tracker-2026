@@ -1,0 +1,68 @@
+// Types mirror the EXACT schema in KL_Tracker_schema.sql. We connect to the
+// existing Supabase database — nothing here recreates it.
+
+export type AssetType = "pdp" | "paid_social" | "ugc" | "group";
+export type SlotLevel = "product" | "collection";
+export type AssetStatus = "not_started" | "in_progress" | "ready" | "na";
+
+export interface Style {
+  style_number: number;
+  name: string;
+  is_hero: boolean;
+}
+
+export interface Product {
+  id: number;
+  team: string;
+  style_number: number;
+  dtc_ovg_units: number | null;
+  dtc_ovg_msrp: number | null;
+  msrp_flagged: boolean;
+  phase: string; // 'Phase 1' | 'Phase 2' | 'Backlog'
+  notes: string | null;
+}
+
+export interface AssetSlot {
+  id: number;
+  asset_type: AssetType;
+  code: string;
+  label: string;
+  level: SlotLevel;
+  sort: number;
+}
+
+export interface StyleRequirement {
+  style_number: number;
+  asset_slot_id: number;
+  is_required: boolean;
+}
+
+export interface ProductAsset {
+  id: number;
+  product_id: number;
+  asset_slot_id: number;
+  status: AssetStatus;
+  final_url: string | null;
+  updated_at: string;
+}
+
+export interface Collection {
+  id: number;
+  name: string;
+  style_number: number | null;
+  ugc_in_scope: boolean;
+}
+
+export interface CollectionAsset {
+  id: number;
+  collection_id: number;
+  asset_slot_id: number;
+  status: AssetStatus;
+  final_url: string | null;
+  updated_at: string;
+}
+
+// Convenience shape: a product joined to its style name.
+export interface ProductRow extends Product {
+  style_name: string;
+}
