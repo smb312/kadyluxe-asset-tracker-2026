@@ -96,5 +96,6 @@ export interface BriefLink {
   kind: BriefLinkKind;
   title: string;
   url: string;
+  storage_path: string | null; // set when the file was uploaded to Storage
   updated_at: string;
 }

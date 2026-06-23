@@ -89,6 +89,11 @@ export function BriefsEditor({
     url: "",
     team: "", // "" = all teams
   });
+  const [uploading, setUploading] = useState(false);
+
+  const BUCKET = "brief-assets";
+  const isImageLink = (l: BriefLink) =>
+    !!l.storage_path || /\.(png|jpe?g|webp|gif)$/i.test(l.url);
 
   const slotsById = useMemo(() => {
     const m = new Map<number, AssetSlot>();
@@ -175,10 +180,63 @@ export function BriefsEditor({
     setMsg("Link added.");
   }
 
-  async function deleteLink(id: number) {
+  // Upload a PNG/JPG to Storage, then record it as a brief_link with its URL.
+  async function uploadFile(file: File) {
+    setUploading(true);
+    setErr(null);
+    const safe = file.name.replace(/[^\w.\-]/g, "_");
+    const path = `${styleNumber}/${Date.now()}-${safe}`;
+
+    const up = await supabase.storage.from(BUCKET).upload(path, file, {
+      upsert: false,
+      contentType: file.type || undefined,
+    });
+    if (up.error) {
+      setErr(
+        up.error.message.includes("Bucket not found")
+          ? "Storage isn't set up yet — run supabase/olivia_briefs.sql (section 5) first."
+          : up.error.message,
+      );
+      setUploading(false);
+      return;
+    }
+
+    const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
+    const { data, error } = await supabase
+      .from("brief_links")
+      .insert({
+        style_number: styleNumber,
+        team: newLink.team || null,
+        kind: newLink.kind,
+        title: file.name,
+        url: pub.publicUrl,
+        storage_path: path,
+      })
+      .select()
+      .single();
+
+    if (error || !data) {
+      // Roll back the orphaned file if the row insert failed.
+      await supabase.storage.from(BUCKET).remove([path]);
+      setErr(error?.message ?? "Could not save the uploaded image.");
+      setUploading(false);
+      return;
+    }
+    setLinkList((l) => [...l, data as BriefLink]);
+    setMsg("Image uploaded.");
+    setUploading(false);
+  }
+
+  async function deleteLink(link: BriefLink) {
     const snapshot = linkList;
-    setLinkList((l) => l.filter((x) => x.id !== id));
-    const { error } = await supabase.from("brief_links").delete().eq("id", id);
+    setLinkList((l) => l.filter((x) => x.id !== link.id));
+    if (link.storage_path) {
+      await supabase.storage.from(BUCKET).remove([link.storage_path]);
+    }
+    const { error } = await supabase
+      .from("brief_links")
+      .delete()
+      .eq("id", link.id);
     if (error) {
       setLinkList(snapshot);
       setErr(error.message);
@@ -553,6 +611,16 @@ export function BriefsEditor({
                         key={l.id}
                         className="flex items-center gap-2 text-sm"
                       >
+                        {isImageLink(l) && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <a href={l.url} target="_blank" rel="noopener noreferrer">
+                            <img
+                              src={l.url}
+                              alt={l.title}
+                              className="w-8 h-8 object-cover rounded border border-line shrink-0"
+                            />
+                          </a>
+                        )}
                         <a
                           href={l.url}
                           target="_blank"
@@ -562,6 +630,11 @@ export function BriefsEditor({
                         >
                           {l.title}
                         </a>
+                        {l.storage_path && (
+                          <span className="font-mono text-[9px] uppercase text-gold shrink-0">
+                            uploaded
+                          </span>
+                        )}
                         {l.team && (
                           <span className="font-mono text-[9px] uppercase bg-paper border border-line rounded px-1 py-0.5 text-muted shrink-0">
                             {l.team}
@@ -569,7 +642,7 @@ export function BriefsEditor({
                         )}
                         <button
                           type="button"
-                          onClick={() => deleteLink(l.id)}
+                          onClick={() => deleteLink(l)}
                           title="Delete link"
                           className="ml-auto text-muted hover:text-bad shrink-0"
                         >
@@ -647,6 +720,31 @@ export function BriefsEditor({
                 >
                   + Add
                 </button>
+              </div>
+
+              {/* Or upload a file instead of pasting a URL */}
+              <div className="flex items-center gap-2">
+                <label
+                  className={`font-mono text-[10px] uppercase tracking-[0.04em] px-3 py-1.5
+                    rounded border border-line cursor-pointer hover:border-gold
+                    ${uploading ? "opacity-50 pointer-events-none" : "text-ink"}`}
+                >
+                  {uploading ? "Uploading…" : "⬆ Upload PNG / JPG"}
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    className="hidden"
+                    disabled={uploading}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) uploadFile(f);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+                <span className="font-mono text-[9px] text-muted">
+                  uses the kind &amp; team selected above
+                </span>
               </div>
             </div>
           </div>

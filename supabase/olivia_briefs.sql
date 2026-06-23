@@ -33,9 +33,13 @@ create table if not exists brief_links (
                 -- styling_guide | product_photos | model_reference | pdf | other
   title         text not null default '',
   url           text not null,
+  storage_path  text,            -- set when the file was uploaded to Storage
   updated_at    timestamptz not null default now()
 );
 create index if not exists idx_brief_links_style on brief_links(style_number);
+
+-- For installs created before uploads existed: add the column if missing.
+alter table brief_links add column if not exists storage_path text;
 
 -- ========== 3. GRANTS ==========
 -- This app is open (no login), like the rest of the tool. RLS stays off and the
@@ -66,7 +70,30 @@ insert into brief_links (style_number, team, kind, title, url) values
     'https://drive.google.com/drive/folders/1Se_naFWzgXKtHVQDzPh9NY2HlX737JNb')
 on conflict do nothing;
 
+-- ========== 5. STORAGE BUCKET FOR UPLOADED IMAGES ==========
+-- Lets you upload PNG/JPG styling/product images directly (no Drive link needed).
+-- The bucket is PUBLIC so the images render in the app and their URLs can be
+-- handed to Olivia AI — same "open tool" posture as the rest of this app.
+insert into storage.buckets (id, name, public)
+values ('brief-assets', 'brief-assets', true)
+on conflict (id) do nothing;
+
+-- Allow the public (anon) role to read/upload/delete within this one bucket.
+drop policy if exists "brief-assets read"   on storage.objects;
+drop policy if exists "brief-assets insert" on storage.objects;
+drop policy if exists "brief-assets update" on storage.objects;
+drop policy if exists "brief-assets delete" on storage.objects;
+
+create policy "brief-assets read" on storage.objects
+  for select to anon, authenticated using (bucket_id = 'brief-assets');
+create policy "brief-assets insert" on storage.objects
+  for insert to anon, authenticated with check (bucket_id = 'brief-assets');
+create policy "brief-assets update" on storage.objects
+  for update to anon, authenticated using (bucket_id = 'brief-assets');
+create policy "brief-assets delete" on storage.objects
+  for delete to anon, authenticated using (bucket_id = 'brief-assets');
+
 -- =====================================================================
 -- DONE. Open the app's "Briefs" page to fill in model / environment / styling
--- notes and manage links per style.
+-- notes, manage links, and upload images per style.
 -- =====================================================================
