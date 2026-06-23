@@ -278,7 +278,7 @@ export function SkuHub({ rows }: { rows: HubRow[] }) {
           Pending reviews <b className="text-ink">{totals.pending}</b>
         </span>
         <span className="ml-auto text-[#b3aa99]">
-          Click a row for its brief · the Review cell for its board
+          Click a row for its team brief · the Review cell for its board
         </span>
       </div>
 
@@ -320,8 +320,12 @@ export function SkuHub({ rows }: { rows: HubRow[] }) {
             {filtered.map((r) => (
               <tr
                 key={r.productId}
-                onClick={() => router.push(`/briefs?style=${r.styleNumber}`)}
-                title="Open this style’s brief"
+                onClick={() =>
+                  router.push(
+                    `/briefs?style=${r.styleNumber}&tab=teams&team=${encodeURIComponent(r.team)}`,
+                  )
+                }
+                title="Open this team’s brief card"
                 className="hover:bg-[#fbf9f4] align-top cursor-pointer"
               >
                 <td className="px-2 py-1.5 border-b border-line text-[#3f3a32] whitespace-nowrap">

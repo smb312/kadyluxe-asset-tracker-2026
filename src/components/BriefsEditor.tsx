@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type {
@@ -93,6 +93,7 @@ export function BriefsEditor({
   productBriefs,
   initialStyle,
   initialTab,
+  initialTeam,
 }: {
   styles: Style[];
   slots: AssetSlot[];
@@ -103,6 +104,7 @@ export function BriefsEditor({
   productBriefs: ProductBrief[];
   initialStyle?: number;
   initialTab?: TabKey;
+  initialTeam?: string;
 }) {
   const supabase = useMemo(() => createClient(), []);
 
@@ -112,6 +114,7 @@ export function BriefsEditor({
       : styles[0]?.style_number) ?? 0,
   );
   const [tab, setTab] = useState<TabKey>(initialTab ?? "brief");
+  const [highlightTeamId, setHighlightTeamId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState<Record<BriefStatus, boolean>>({
     draft: false,
@@ -626,6 +629,29 @@ export function BriefsEditor({
           : "bg-neutralbg text-neutral border-[#d8d1c2]"
     }`;
 
+  // Arriving from the All-SKUs sheet with ?team=… : open the By-team tab and
+  // scroll/flash that team's card. Runs once on mount.
+  useEffect(() => {
+    if (!initialTeam) return;
+    const t = (teamsMap[styleNumber] ?? []).find(
+      (x) => x.team.toLowerCase() === initialTeam.toLowerCase(),
+    );
+    if (!t) return;
+    setTab("teams");
+    setHighlightTeamId(t.product_id);
+    const raf = requestAnimationFrame(() => {
+      document
+        .getElementById(`team-${t.product_id}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    const timer = setTimeout(() => setHighlightTeamId(null), 2600);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const assetLinks =
     assetTeam === ""
       ? styleLinks
@@ -996,7 +1022,12 @@ export function BriefsEditor({
                 {teamList.map((t) => (
                   <div
                     key={t.product_id}
-                    className="border border-line rounded-lg bg-white p-3"
+                    id={`team-${t.product_id}`}
+                    className={`border rounded-lg bg-white p-3 transition-shadow ${
+                      highlightTeamId === t.product_id
+                        ? "border-gold ring-2 ring-gold/40"
+                        : "border-line"
+                    }`}
                   >
                     <div className="flex items-center gap-2 mb-3">
                       <input

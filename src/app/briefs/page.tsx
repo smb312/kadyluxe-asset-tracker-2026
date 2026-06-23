@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 export default async function BriefsPage({
   searchParams,
 }: {
-  searchParams: { style?: string; tab?: string };
+  searchParams: { style?: string; tab?: string; team?: string };
 }) {
   const supabase = await createClient();
   const initialStyle = searchParams.style ? Number(searchParams.style) : undefined;
@@ -26,6 +26,7 @@ export default async function BriefsPage({
     | "assets"
     | "hub"
     | undefined;
+  const initialTeam = searchParams.team;
 
   const [
     stylesRes,
@@ -108,6 +109,7 @@ export default async function BriefsPage({
             productBriefs={(pbRes.data ?? []) as ProductBrief[]}
             initialStyle={initialStyle}
             initialTab={initialTab}
+            initialTeam={initialTeam}
           />
         </div>
       )}
