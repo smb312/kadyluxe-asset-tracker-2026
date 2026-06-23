@@ -105,7 +105,7 @@ export function ReviewsBoard({
     return list.sort((a, b) => a.slot.sort - b.slot.sort);
   }, [requirements, slotsById, styleNumber]);
 
-  const assetsForSlot = (slotId: number) =>
+  const assetsForSlot = (slotId: number | null) =>
     assetList.filter(
       (a) =>
         a.product_id === effectiveProductId &&
@@ -144,11 +144,11 @@ export function ReviewsBoard({
     return data as ReviewAsset;
   }
 
-  async function uploadReview(slotId: number, file: File) {
-    setUploadingSlot(slotId);
+  async function uploadReview(slotId: number | null, file: File) {
+    setUploadingSlot(slotId ?? 0);
     setErr(null);
     const safe = file.name.replace(/[^\w.\-]/g, "_");
-    const path = `${effectiveProductId}/${slotId}/${Date.now()}-${safe}`;
+    const path = `${effectiveProductId}/${slotId ?? "general"}/${Date.now()}-${safe}`;
     const up = await supabase.storage.from(BUCKET).upload(path, file, {
       upsert: false,
       contentType: file.type || undefined,
@@ -176,8 +176,9 @@ export function ReviewsBoard({
     setUploadingSlot(null);
   }
 
-  async function addLinkAsset(slotId: number) {
-    const n = newBySlot[slotId];
+  async function addLinkAsset(slotId: number | null) {
+    const key = slotId ?? 0;
+    const n = newBySlot[key];
     if (!n?.url.trim()) return;
     await insertAsset({
       product_id: effectiveProductId,
@@ -190,7 +191,7 @@ export function ReviewsBoard({
     });
     setNewBySlot((m) => ({
       ...m,
-      [slotId]: { kind: n.kind, url: "", title: "" },
+      [key]: { kind: n.kind, url: "", title: "" },
     }));
   }
 
@@ -218,8 +219,10 @@ export function ReviewsBoard({
       setErr(error.message);
       return;
     }
-    // Approving a shot marks it Ready in the tracker, with this asset as the link.
-    if (status === "approved") {
+    // Approving a shot-tagged asset marks that shot Ready in the tracker, with
+    // this asset as the link. Product-level (untagged) approvals don't touch a
+    // specific shot.
+    if (status === "approved" && asset.asset_slot_id != null) {
       await supabase.from("product_assets").upsert(
         {
           product_id: asset.product_id,
@@ -346,26 +349,30 @@ export function ReviewsBoard({
             No shots defined for this style — set them on the Requirements page.
           </p>
         )}
-        {shots.map(({ slot, required }) => {
-          const cardAssets = assetsForSlot(slot.id);
-          const nl = newBySlot[slot.id] ?? {
+        {[{ slot: null, required: false }, ...shots].map(({ slot, required }) => {
+          const slotId = slot ? slot.id : null;
+          const mapKey = slot ? slot.id : 0;
+          const cardAssets = assetsForSlot(slotId);
+          const nl = newBySlot[mapKey] ?? {
             kind: "loom" as ReviewKind,
             url: "",
             title: "",
           };
           return (
             <div
-              key={slot.id}
+              key={slot ? slot.id : "general"}
               className="border border-line rounded-lg bg-white p-3"
             >
               <div className="flex items-center gap-2 mb-2">
                 <span className="font-disp uppercase font-bold text-base">
-                  {slot.label}
+                  {slot ? slot.label : "General — no specific shot"}
                 </span>
-                <span className="font-mono text-[9px] uppercase text-muted border border-line rounded px-1.5 py-0.5">
-                  {TYPE_LABEL[slot.asset_type] ?? slot.asset_type}
-                </span>
-                {!required && (
+                {slot && (
+                  <span className="font-mono text-[9px] uppercase text-muted border border-line rounded px-1.5 py-0.5">
+                    {TYPE_LABEL[slot.asset_type] ?? slot.asset_type}
+                  </span>
+                )}
+                {slot && !required && (
                   <span className="font-mono text-[9px] uppercase text-muted">
                     optional
                   </span>
@@ -554,17 +561,17 @@ export function ReviewsBoard({
                 <label
                   className={`font-mono text-[10px] uppercase tracking-[0.04em] px-3 py-1.5
                     rounded border border-line cursor-pointer hover:border-gold
-                    ${uploadingSlot === slot.id ? "opacity-50 pointer-events-none" : "text-ink"}`}
+                    ${uploadingSlot === mapKey ? "opacity-50 pointer-events-none" : "text-ink"}`}
                 >
-                  {uploadingSlot === slot.id ? "Uploading…" : "⬆ Upload image"}
+                  {uploadingSlot === mapKey ? "Uploading…" : "⬆ Upload image"}
                   <input
                     type="file"
                     accept="image/png,image/jpeg,image/webp,image/gif"
                     className="hidden"
-                    disabled={uploadingSlot === slot.id}
+                    disabled={uploadingSlot === mapKey}
                     onChange={(e) => {
                       const f = e.target.files?.[0];
-                      if (f) uploadReview(slot.id, f);
+                      if (f) uploadReview(slotId, f);
                       e.target.value = "";
                     }}
                   />
@@ -575,7 +582,7 @@ export function ReviewsBoard({
                   onChange={(e) =>
                     setNewBySlot((m) => ({
                       ...m,
-                      [slot.id]: { ...nl, kind: e.target.value as ReviewKind },
+                      [mapKey]: { ...nl, kind: e.target.value as ReviewKind },
                     }))
                   }
                   className="text-[12px] px-2 py-1.5 border border-line rounded bg-white
@@ -589,10 +596,10 @@ export function ReviewsBoard({
                   onChange={(e) =>
                     setNewBySlot((m) => ({
                       ...m,
-                      [slot.id]: { ...nl, url: e.target.value },
+                      [mapKey]: { ...nl, url: e.target.value },
                     }))
                   }
-                  onKeyDown={(e) => e.key === "Enter" && addLinkAsset(slot.id)}
+                  onKeyDown={(e) => e.key === "Enter" && addLinkAsset(slotId)}
                   placeholder="Paste Loom / link URL…"
                   className="flex-1 min-w-[160px] text-[12px] px-2 py-1.5 border border-line rounded
                     focus:outline-none focus:border-gold"
@@ -600,7 +607,7 @@ export function ReviewsBoard({
                 <button
                   type="button"
                   disabled={!nl.url.trim()}
-                  onClick={() => addLinkAsset(slot.id)}
+                  onClick={() => addLinkAsset(slotId)}
                   className="font-mono text-[10px] uppercase tracking-[0.04em] px-3 py-1.5
                     rounded bg-ink text-white disabled:opacity-40"
                 >

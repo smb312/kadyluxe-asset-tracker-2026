@@ -114,7 +114,7 @@ create policy "brief-assets delete" on storage.objects
 create table if not exists review_assets (
   id            bigint generated always as identity primary key,
   product_id    bigint not null references products(id)   on delete cascade,
-  asset_slot_id bigint not null references asset_slots(id) on delete cascade,
+  asset_slot_id bigint references asset_slots(id) on delete cascade, -- NULL = product-level (no specific shot)
   kind          text not null default 'image',   -- image | loom | link
   title         text not null default '',
   url           text not null,
@@ -128,6 +128,8 @@ create table if not exists review_assets (
   updated_at    timestamptz not null default now()
 );
 create index if not exists idx_review_assets_product on review_assets(product_id);
+-- For installs created before product-level uploads existed: make the shot optional.
+alter table review_assets alter column asset_slot_id drop not null;
 
 create table if not exists review_comments (
   id              bigint generated always as identity primary key,

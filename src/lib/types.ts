@@ -125,7 +125,7 @@ export type ReviewKind = "image" | "loom" | "link";
 export interface ReviewAsset {
   id: number;
   product_id: number;
-  asset_slot_id: number;
+  asset_slot_id: number | null; // null = product-level (no specific shot)
   kind: ReviewKind;
   title: string;
   url: string;
