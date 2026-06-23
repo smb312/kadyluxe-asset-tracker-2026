@@ -66,3 +66,35 @@ export interface CollectionAsset {
 export interface ProductRow extends Product {
   style_name: string;
 }
+
+// --- Olivia AI creative briefs (additive tables; see supabase/olivia_briefs.sql) ---
+
+export type BriefStatus = "draft" | "ready" | "delivered";
+
+export interface StyleBrief {
+  style_number: number;
+  model_notes: string | null;
+  lifestyle_environment: string | null;
+  model_styling_notes: string | null;
+  product_feel_notes: string | null;
+  extra_notes: string | null;
+  status: BriefStatus;
+  updated_at: string;
+}
+
+export type BriefLinkKind =
+  | "styling_guide"
+  | "product_photos"
+  | "model_reference"
+  | "pdf"
+  | "other";
+
+export interface BriefLink {
+  id: number;
+  style_number: number;
+  team: string | null; // null = applies to all teams of this style
+  kind: BriefLinkKind;
+  title: string;
+  url: string;
+  updated_at: string;
+}

@@ -1,7 +1,11 @@
 import Link from "next/link";
 
-// Header navigation between the tracker grid and the requirements editor.
-export function Nav({ active }: { active: "tracker" | "settings" }) {
+// Header navigation between the tracker grid, requirements editor, and briefs.
+export function Nav({
+  active,
+}: {
+  active: "tracker" | "settings" | "briefs";
+}) {
   const linkCls = (on: boolean) =>
     `font-mono text-[10px] uppercase tracking-[0.08em] px-2.5 py-1 rounded border ${
       on
@@ -16,6 +20,9 @@ export function Nav({ active }: { active: "tracker" | "settings" }) {
       </Link>
       <Link href="/settings" className={linkCls(active === "settings")}>
         Requirements
+      </Link>
+      <Link href="/briefs" className={linkCls(active === "briefs")}>
+        Briefs
       </Link>
     </div>
   );
