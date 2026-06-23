@@ -240,8 +240,139 @@ export function BriefsEditor({
 
   const shots = shotsByStyle.get(styleNumber) ?? [];
 
+  // Coverage overview across every style (live as you edit).
+  const overview = useMemo(
+    () =>
+      styles.map((s) => {
+        const b = briefMap[s.style_number];
+        const status: BriefStatus = b?.status ?? "draft";
+        const core = [
+          b?.model_notes,
+          b?.lifestyle_environment,
+          b?.model_styling_notes,
+          b?.product_feel_notes,
+        ];
+        const filled = core.filter((v) => (v ?? "").trim()).length;
+        const linkCount = linkList.filter(
+          (l) => l.style_number === s.style_number,
+        ).length;
+        const teamCount = (teamsByStyle[s.style_number] ?? []).length;
+        return { s, status, filled, linkCount, teamCount };
+      }),
+    [styles, briefMap, linkList, teamsByStyle],
+  );
+
+  function exportCsv() {
+    const rows: string[][] = [
+      ["Style #", "Name", "Hero", "Status", "Fields filled (of 4)", "Links", "Teams"],
+    ];
+    for (const o of overview)
+      rows.push([
+        String(o.s.style_number),
+        o.s.name,
+        o.s.is_hero ? "yes" : "",
+        STATUS_LABEL[o.status],
+        String(o.filled),
+        String(o.linkCount),
+        String(o.teamCount),
+      ]);
+    const csv = rows
+      .map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "kadyluxe-briefs.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const statusPill = (status: BriefStatus) =>
+    `font-mono text-[9px] uppercase tracking-[0.04em] px-1.5 py-0.5 rounded border ${
+      status === "delivered"
+        ? "bg-okbg text-ok border-[#a9dcc2]"
+        : status === "ready"
+          ? "bg-warnbg text-warn border-[#ecd49a]"
+          : "bg-neutralbg text-neutral border-[#d8d1c2]"
+    }`;
+
   return (
     <div className="max-w-4xl">
+      {/* Coverage overview — all briefs at a glance */}
+      <details className="mb-5 border border-line rounded-lg bg-white" open>
+        <summary className="cursor-pointer px-3 py-2 flex items-center gap-2">
+          <span className="font-disp uppercase font-bold text-base">
+            Coverage — all briefs
+          </span>
+          <span className="font-mono text-[10px] text-muted">
+            {overview.filter((o) => o.status === "delivered").length} delivered ·{" "}
+            {overview.filter((o) => o.status === "ready").length} ready ·{" "}
+            {overview.filter((o) => o.status === "draft").length} draft
+          </span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              exportCsv();
+            }}
+            className="ml-auto font-mono text-[10px] uppercase tracking-[0.06em]
+              px-2.5 py-1 rounded border border-line text-muted hover:text-ink"
+          >
+            Export CSV
+          </button>
+        </summary>
+        <div className="max-h-72 overflow-auto border-t border-line">
+          <table className="w-full border-collapse">
+            <thead className="sticky top-0 bg-paper">
+              <tr>
+                <th className="th">Style</th>
+                <th className="th text-center">Status</th>
+                <th className="th text-center">Fields</th>
+                <th className="th text-center">Links</th>
+                <th className="th text-center">Teams</th>
+              </tr>
+            </thead>
+            <tbody>
+              {overview.map((o) => (
+                <tr
+                  key={o.s.style_number}
+                  onClick={() => {
+                    setStyleNumber(o.s.style_number);
+                    setMsg(null);
+                    setErr(null);
+                  }}
+                  className={`cursor-pointer hover:bg-[#fbf9f4] ${
+                    o.s.style_number === styleNumber ? "bg-[#fbf9f4]" : ""
+                  }`}
+                >
+                  <td className="px-2 py-1.5 border-b border-line text-sm">
+                    <span className="font-mono text-[11px] text-muted mr-1">
+                      {o.s.style_number}
+                    </span>
+                    {o.s.name}
+                    {o.s.is_hero ? " ★" : ""}
+                  </td>
+                  <td className="px-2 py-1.5 border-b border-line text-center">
+                    <span className={statusPill(o.status)}>
+                      {STATUS_LABEL[o.status]}
+                    </span>
+                  </td>
+                  <td className="px-2 py-1.5 border-b border-line text-center font-mono text-[11px]">
+                    {o.filled}/4
+                  </td>
+                  <td className="px-2 py-1.5 border-b border-line text-center font-mono text-[11px]">
+                    {o.linkCount}
+                  </td>
+                  <td className="px-2 py-1.5 border-b border-line text-center font-mono text-[11px]">
+                    {o.teamCount}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
+
       {/* Style picker + status */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <label className="font-mono text-[11px] uppercase tracking-[0.06em] text-muted">
