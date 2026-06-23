@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { BriefStatus } from "@/lib/types";
 import { fmtMoney } from "@/lib/assets";
 
@@ -47,6 +48,7 @@ type SortCol =
   | "pending";
 
 export function SkuHub({ rows }: { rows: HubRow[] }) {
+  const router = useRouter();
   const [q, setQ] = useState("");
   const [style, setStyle] = useState("");
   const [phase, setPhase] = useState("");
@@ -275,6 +277,9 @@ export function SkuHub({ rows }: { rows: HubRow[] }) {
         <span>
           Pending reviews <b className="text-ink">{totals.pending}</b>
         </span>
+        <span className="ml-auto text-[#b3aa99]">
+          Click a row for its brief · the Review cell for its board
+        </span>
       </div>
 
       {/* Sheet */}
@@ -313,7 +318,12 @@ export function SkuHub({ rows }: { rows: HubRow[] }) {
           </thead>
           <tbody>
             {filtered.map((r) => (
-              <tr key={r.productId} className="hover:bg-[#fbf9f4] align-top">
+              <tr
+                key={r.productId}
+                onClick={() => router.push(`/briefs?style=${r.styleNumber}`)}
+                title="Open this style’s brief"
+                className="hover:bg-[#fbf9f4] align-top cursor-pointer"
+              >
                 <td className="px-2 py-1.5 border-b border-line text-[#3f3a32] whitespace-nowrap">
                   <span className="font-mono text-[10px] text-muted mr-1">
                     {r.styleNumber}
@@ -364,15 +374,20 @@ export function SkuHub({ rows }: { rows: HubRow[] }) {
                     <span className="font-mono text-[10px] text-[#c4bcab]">—</span>
                   )}
                 </td>
-                <td className="px-2 py-1.5 border-b border-line text-center font-mono text-[11px]">
+                <td
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    router.push(
+                      `/reviews?style=${r.styleNumber}&product=${r.productId}`,
+                    );
+                  }}
+                  title="Open this SKU’s review board"
+                  className="px-2 py-1.5 border-b border-line text-center font-mono text-[11px] hover:bg-[#f3eee2]"
+                >
                   {r.pendingReviews > 0 ? (
-                    <span className="text-warn" title="Assets awaiting review">
-                      {r.pendingReviews} ⏳
-                    </span>
+                    <span className="text-warn">{r.pendingReviews} ⏳</span>
                   ) : r.approvedReviews > 0 ? (
-                    <span className="text-ok" title="Approved review assets">
-                      {r.approvedReviews} ✓
-                    </span>
+                    <span className="text-ok">{r.approvedReviews} ✓</span>
                   ) : (
                     <span className="text-[#c4bcab]">—</span>
                   )}

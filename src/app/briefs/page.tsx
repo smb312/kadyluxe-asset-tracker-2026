@@ -13,8 +13,19 @@ import type {
 
 export const dynamic = "force-dynamic";
 
-export default async function BriefsPage() {
+export default async function BriefsPage({
+  searchParams,
+}: {
+  searchParams: { style?: string; tab?: string };
+}) {
   const supabase = await createClient();
+  const initialStyle = searchParams.style ? Number(searchParams.style) : undefined;
+  const initialTab = searchParams.tab as
+    | "brief"
+    | "teams"
+    | "assets"
+    | "hub"
+    | undefined;
 
   const [
     stylesRes,
@@ -95,6 +106,8 @@ export default async function BriefsPage() {
             briefs={(briefsRes.data ?? []) as StyleBrief[]}
             links={(linksRes.data ?? []) as BriefLink[]}
             productBriefs={(pbRes.data ?? []) as ProductBrief[]}
+            initialStyle={initialStyle}
+            initialTab={initialTab}
           />
         </div>
       )}

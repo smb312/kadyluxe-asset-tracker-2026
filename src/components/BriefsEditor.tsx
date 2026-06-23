@@ -91,6 +91,8 @@ export function BriefsEditor({
   briefs,
   links,
   productBriefs,
+  initialStyle,
+  initialTab,
 }: {
   styles: Style[];
   slots: AssetSlot[];
@@ -99,13 +101,17 @@ export function BriefsEditor({
   briefs: StyleBrief[];
   links: BriefLink[];
   productBriefs: ProductBrief[];
+  initialStyle?: number;
+  initialTab?: TabKey;
 }) {
   const supabase = useMemo(() => createClient(), []);
 
   const [styleNumber, setStyleNumber] = useState<number>(
-    styles[0]?.style_number ?? 0,
+    (initialStyle && styles.some((s) => s.style_number === initialStyle)
+      ? initialStyle
+      : styles[0]?.style_number) ?? 0,
   );
-  const [tab, setTab] = useState<TabKey>("brief");
+  const [tab, setTab] = useState<TabKey>(initialTab ?? "brief");
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState<Record<BriefStatus, boolean>>({
     draft: false,

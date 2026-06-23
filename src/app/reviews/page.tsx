@@ -17,8 +17,16 @@ export interface ReviewProduct {
   style_number: number;
 }
 
-export default async function ReviewsPage() {
+export default async function ReviewsPage({
+  searchParams,
+}: {
+  searchParams: { style?: string; product?: string };
+}) {
   const supabase = await createClient();
+  const initialStyle = searchParams.style ? Number(searchParams.style) : undefined;
+  const initialProductId = searchParams.product
+    ? Number(searchParams.product)
+    : undefined;
 
   const [stylesRes, slotsRes, reqRes, productsRes, assetsRes, commentsRes] =
     await Promise.all([
@@ -74,6 +82,8 @@ export default async function ReviewsPage() {
             products={(productsRes.data ?? []) as ReviewProduct[]}
             assets={(assetsRes.data ?? []) as ReviewAsset[]}
             comments={(commentsRes.data ?? []) as ReviewComment[]}
+            initialStyle={initialStyle}
+            initialProductId={initialProductId}
           />
         </div>
       )}

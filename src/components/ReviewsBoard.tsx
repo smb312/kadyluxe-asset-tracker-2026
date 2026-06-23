@@ -37,6 +37,8 @@ export function ReviewsBoard({
   products,
   assets,
   comments,
+  initialStyle,
+  initialProductId,
 }: {
   styles: Style[];
   slots: AssetSlot[];
@@ -44,6 +46,8 @@ export function ReviewsBoard({
   products: ReviewProduct[];
   assets: ReviewAsset[];
   comments: ReviewComment[];
+  initialStyle?: number;
+  initialProductId?: number;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const [identity, setIdentity] = useIdentity();
@@ -70,7 +74,10 @@ export function ReviewsBoard({
     return styles.filter((s) => ids.has(s.style_number));
   }, [styles, products]);
   const [styleNumber, setStyleNumber] = useState<number>(
-    stylesWithProducts[0]?.style_number ?? 0,
+    (initialStyle &&
+    stylesWithProducts.some((s) => s.style_number === initialStyle)
+      ? initialStyle
+      : stylesWithProducts[0]?.style_number) ?? 0,
   );
   const teamsForStyle = useMemo(
     () =>
@@ -80,7 +87,9 @@ export function ReviewsBoard({
     [products, styleNumber],
   );
   const [productId, setProductId] = useState<number>(
-    teamsForStyle[0]?.id ?? 0,
+    (initialProductId && teamsForStyle.some((t) => t.id === initialProductId)
+      ? initialProductId
+      : teamsForStyle[0]?.id) ?? 0,
   );
   // Keep productId valid when the style changes.
   const effectiveProductId = teamsForStyle.some((t) => t.id === productId)
