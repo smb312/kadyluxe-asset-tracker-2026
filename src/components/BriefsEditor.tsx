@@ -8,9 +8,11 @@ import type {
   BriefLink,
   BriefLinkKind,
   BriefStatus,
+  ProductBrief,
   Style,
   StyleBrief,
   StyleRequirement,
+  StyleTeam,
 } from "@/lib/types";
 
 const KIND_LABEL: Record<BriefLinkKind, string> = {
@@ -54,6 +56,17 @@ function emptyBrief(style_number: number): StyleBrief {
   };
 }
 
+function emptyProductBrief(product_id: number): ProductBrief {
+  return {
+    product_id,
+    model_notes: "",
+    lifestyle_environment: "",
+    model_styling_notes: "",
+    notes: "",
+    updated_at: "",
+  };
+}
+
 export function BriefsEditor({
   styles,
   slots,
@@ -61,13 +74,15 @@ export function BriefsEditor({
   teamsByStyle,
   briefs,
   links,
+  productBriefs,
 }: {
   styles: Style[];
   slots: AssetSlot[];
   requirements: StyleRequirement[];
-  teamsByStyle: Record<number, string[]>;
+  teamsByStyle: Record<number, StyleTeam[]>;
   briefs: StyleBrief[];
   links: BriefLink[];
+  productBriefs: ProductBrief[];
 }) {
   const supabase = useMemo(() => createClient(), []);
 
@@ -80,6 +95,11 @@ export function BriefsEditor({
     return m;
   });
   const [linkList, setLinkList] = useState<BriefLink[]>(links);
+  const [pbMap, setPbMap] = useState<Record<number, ProductBrief>>(() => {
+    const m: Record<number, ProductBrief> = {};
+    for (const pb of productBriefs) m[pb.product_id] = pb;
+    return m;
+  });
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -115,10 +135,44 @@ export function BriefsEditor({
   }, [requirements, slotsById]);
 
   const brief = briefMap[styleNumber] ?? emptyBrief(styleNumber);
-  const teams = teamsByStyle[styleNumber] ?? [];
+  const teamList = teamsByStyle[styleNumber] ?? [];
+  const teams = teamList.map((t) => t.team);
   const styleName =
     styles.find((s) => s.style_number === styleNumber)?.name ?? "";
   const styleLinks = linkList.filter((l) => l.style_number === styleNumber);
+
+  // Per-team override helpers. A blank override inherits the style default.
+  const pbOf = (productId: number) =>
+    pbMap[productId] ?? emptyProductBrief(productId);
+  const eff = (productId: number, field: keyof ProductBrief, fallback: string) => {
+    const v = (pbMap[productId]?.[field] as string | null | undefined) ?? "";
+    return v.trim() ? v : fallback;
+  };
+
+  function setPbField(productId: number, field: keyof ProductBrief, value: string) {
+    setPbMap((m) => ({
+      ...m,
+      [productId]: { ...pbOf(productId), [field]: value },
+    }));
+  }
+
+  async function savePb(productId: number) {
+    const cur = pbOf(productId);
+    setErr(null);
+    const { error } = await supabase.from("product_briefs").upsert(
+      {
+        product_id: productId,
+        model_notes: cur.model_notes,
+        lifestyle_environment: cur.lifestyle_environment,
+        model_styling_notes: cur.model_styling_notes,
+        notes: cur.notes,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "product_id" },
+    );
+    if (error) setErr(error.message);
+    else setMsg("Team detail saved.");
+  }
 
   function setField(field: keyof StyleBrief, value: string) {
     setBriefMap((m) => ({
@@ -266,11 +320,26 @@ export function BriefsEditor({
       lines.push(val && val.trim() ? val.trim() : "  —");
       lines.push("");
     };
-    section("MODEL TO USE", brief.model_notes);
-    section("LIFESTYLE SHOT ENVIRONMENT", brief.lifestyle_environment);
+    section("MODEL TO USE (default)", brief.model_notes);
+    section("LIFESTYLE SHOT ENVIRONMENT (default)", brief.lifestyle_environment);
     section("MODEL STYLING (outside the product)", brief.model_styling_notes);
     section("PRODUCT LOOK & FEEL", brief.product_feel_notes);
     if (brief.extra_notes?.trim()) section("NOTES", brief.extra_notes);
+
+    // Per-team breakdown (effective = team override, else the default above).
+    if (teamList.length) {
+      lines.push("PER-TEAM MODEL & ENVIRONMENT:");
+      for (const t of teamList) {
+        lines.push(`  ${t.team}:`);
+        lines.push(`    Model: ${eff(t.product_id, "model_notes", brief.model_notes?.trim() || "—")}`);
+        lines.push(
+          `    Environment: ${eff(t.product_id, "lifestyle_environment", brief.lifestyle_environment?.trim() || "—")}`,
+        );
+        const styling = eff(t.product_id, "model_styling_notes", "");
+        if (styling) lines.push(`    Styling: ${styling}`);
+      }
+      lines.push("");
+    }
 
     if (styleLinks.length) {
       lines.push("RESOURCES / LINKS:");
@@ -506,15 +575,15 @@ export function BriefsEditor({
         {/* Left: brief fields */}
         <div className="space-y-4">
           <Field
-            label="Model to use"
-            placeholder="Which model / look Olivia should generate the product on…"
+            label="Model to use (default — all teams)"
+            placeholder="Default model / look. Override per team below if it differs…"
             value={brief.model_notes ?? ""}
             onChange={(v) => setField("model_notes", v)}
             onBlur={() => saveBrief()}
           />
           <Field
-            label="Lifestyle shot environment"
-            placeholder="Setting / backdrop for the lifestyle shot (e.g., cozy cabin, stadium tailgate)…"
+            label="Lifestyle shot environment (default — all teams)"
+            placeholder="Default setting / backdrop. Override per team below if it differs…"
             value={brief.lifestyle_environment ?? ""}
             onChange={(v) => setField("lifestyle_environment", v)}
             onBlur={() => saveBrief()}
@@ -750,6 +819,72 @@ export function BriefsEditor({
           </div>
         </div>
       </div>
+
+      {/* Per-team model & environment overrides */}
+      <details className="mt-5 border border-line rounded-lg bg-white" open>
+        <summary className="cursor-pointer px-3 py-2 font-disp uppercase font-bold text-base">
+          Per-team details
+          <span className="font-mono text-[10px] font-normal normal-case text-muted ml-2">
+            {teamList.length} team{teamList.length === 1 ? "" : "s"} on this
+            style · blank inherits the default above
+          </span>
+        </summary>
+        <div className="max-h-[28rem] overflow-auto border-t border-line">
+          <table className="w-full border-collapse">
+            <thead className="sticky top-0 bg-paper">
+              <tr>
+                <th className="th">Team</th>
+                <th className="th">Model</th>
+                <th className="th">Lifestyle environment</th>
+                <th className="th">Styling (override)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {teamList.map((t) => (
+                <tr key={t.product_id} className="align-top">
+                  <td className="px-2 py-1.5 border-b border-line text-sm font-semibold whitespace-nowrap">
+                    {t.team}
+                  </td>
+                  {(
+                    [
+                      ["model_notes", brief.model_notes],
+                      ["lifestyle_environment", brief.lifestyle_environment],
+                      ["model_styling_notes", null],
+                    ] as [keyof ProductBrief, string | null][]
+                  ).map(([field, def]) => (
+                    <td key={field} className="px-2 py-1.5 border-b border-line">
+                      <textarea
+                        rows={2}
+                        value={(pbMap[t.product_id]?.[field] as string) ?? ""}
+                        placeholder={
+                          def && def.trim()
+                            ? `Default: ${def.trim()}`
+                            : field === "model_styling_notes"
+                              ? "(optional)"
+                              : "Set a default above…"
+                        }
+                        onChange={(e) =>
+                          setPbField(t.product_id, field, e.target.value)
+                        }
+                        onBlur={() => savePb(t.product_id)}
+                        className="w-full text-[12px] px-2 py-1 border border-line rounded
+                          focus:outline-none focus:border-gold resize-y"
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              {teamList.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-3 py-3 text-sm text-muted">
+                    No teams run this style.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </details>
     </div>
   );
 }

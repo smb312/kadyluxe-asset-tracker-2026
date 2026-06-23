@@ -4,9 +4,11 @@ import { BriefsEditor } from "@/components/BriefsEditor";
 import type {
   AssetSlot,
   BriefLink,
+  ProductBrief,
   StyleBrief,
   StyleRequirement,
   Style,
+  StyleTeam,
 } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -14,36 +16,47 @@ export const dynamic = "force-dynamic";
 export default async function BriefsPage() {
   const supabase = await createClient();
 
-  const [stylesRes, slotsRes, reqRes, productsRes, briefsRes, linksRes] =
-    await Promise.all([
-      supabase.from("styles").select("*").order("style_number"),
-      supabase.from("asset_slots").select("*").order("sort"),
-      supabase.from("style_requirements").select("*"),
-      supabase.from("products").select("team, style_number"),
-      supabase.from("style_briefs").select("*"),
-      supabase.from("brief_links").select("*").order("id"),
-    ]);
+  const [
+    stylesRes,
+    slotsRes,
+    reqRes,
+    productsRes,
+    briefsRes,
+    linksRes,
+    pbRes,
+  ] = await Promise.all([
+    supabase.from("styles").select("*").order("style_number"),
+    supabase.from("asset_slots").select("*").order("sort"),
+    supabase.from("style_requirements").select("*"),
+    supabase.from("products").select("id, team, style_number").order("team"),
+    supabase.from("style_briefs").select("*"),
+    supabase.from("brief_links").select("*").order("id"),
+    supabase.from("product_briefs").select("*"),
+  ]);
 
   // The brief tables are optional (created by supabase/olivia_briefs.sql). If
   // they're missing, show a friendly setup note instead of crashing.
   const briefsMissing =
     briefsRes.error?.message?.includes("style_briefs") ||
-    linksRes.error?.message?.includes("brief_links");
+    linksRes.error?.message?.includes("brief_links") ||
+    pbRes.error?.message?.includes("product_briefs");
 
   const fatal =
     stylesRes.error || slotsRes.error || reqRes.error || productsRes.error;
   if (fatal) throw new Error(fatal.message);
 
-  // teams running each style, for context on the brief.
-  const teamsByStyle: Record<number, string[]> = {};
+  // Teams (with product ids) running each style.
+  const teamsByStyle: Record<number, StyleTeam[]> = {};
   for (const p of (productsRes.data ?? []) as {
+    id: number;
     team: string;
     style_number: number;
   }[]) {
-    (teamsByStyle[p.style_number] ??= []).push(p.team);
+    (teamsByStyle[p.style_number] ??= []).push({
+      product_id: p.id,
+      team: p.team,
+    });
   }
-  for (const k of Object.keys(teamsByStyle))
-    teamsByStyle[Number(k)] = [...new Set(teamsByStyle[Number(k)])].sort();
 
   return (
     <div>
@@ -81,6 +94,7 @@ export default async function BriefsPage() {
             teamsByStyle={teamsByStyle}
             briefs={(briefsRes.data ?? []) as StyleBrief[]}
             links={(linksRes.data ?? []) as BriefLink[]}
+            productBriefs={(pbRes.data ?? []) as ProductBrief[]}
           />
         </div>
       )}

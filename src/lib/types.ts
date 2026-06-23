@@ -82,6 +82,23 @@ export interface StyleBrief {
   updated_at: string;
 }
 
+// A team running a given style, with its product id (for per-team briefs).
+export interface StyleTeam {
+  product_id: number;
+  team: string;
+}
+
+// Per-team (team × style) overrides of model / environment / styling. A blank
+// field inherits the style-level default from StyleBrief.
+export interface ProductBrief {
+  product_id: number;
+  model_notes: string | null;
+  lifestyle_environment: string | null;
+  model_styling_notes: string | null;
+  notes: string | null;
+  updated_at: string;
+}
+
 export type BriefLinkKind =
   | "styling_guide"
   | "product_photos"

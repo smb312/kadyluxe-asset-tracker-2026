@@ -70,7 +70,22 @@ insert into brief_links (style_number, team, kind, title, url) values
     'https://drive.google.com/drive/folders/1Se_naFWzgXKtHVQDzPh9NY2HlX737JNb')
 on conflict do nothing;
 
--- ========== 5. STORAGE BUCKET FOR UPLOADED IMAGES ==========
+-- ========== 5. PER-TEAM BRIEF OVERRIDES ==========
+-- The styling guides and product photos are the same across teams (same
+-- garment), but the MODEL and LIFESTYLE ENVIRONMENT can differ per team. This
+-- table holds per-product (team x style) overrides; a blank field inherits the
+-- style-level default from style_briefs.
+create table if not exists product_briefs (
+  product_id            bigint primary key references products(id) on delete cascade,
+  model_notes           text,
+  lifestyle_environment text,
+  model_styling_notes   text,
+  notes                 text,
+  updated_at            timestamptz not null default now()
+);
+grant all on table product_briefs to anon, authenticated;
+
+-- ========== 6. STORAGE BUCKET FOR UPLOADED IMAGES ==========
 -- Lets you upload PNG/JPG styling/product images directly (no Drive link needed).
 -- The bucket is PUBLIC so the images render in the app and their URLs can be
 -- handed to Olivia AI — same "open tool" posture as the rest of this app.
