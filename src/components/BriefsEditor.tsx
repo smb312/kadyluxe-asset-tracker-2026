@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type {
   AssetSlot,
@@ -35,6 +36,13 @@ const STATUS_LABEL: Record<BriefStatus, string> = {
   ready: "Ready for Olivia",
   delivered: "Delivered",
 };
+// Order the board groups so the actionable work sits up top.
+const STATUS_ORDER: BriefStatus[] = ["ready", "draft", "delivered"];
+const STATUS_DOT: Record<BriefStatus, string> = {
+  draft: "bg-neutral",
+  ready: "bg-warn",
+  delivered: "bg-ok",
+};
 
 const TYPE_LABEL: Record<string, string> = {
   pdp: "PDP shots",
@@ -42,6 +50,14 @@ const TYPE_LABEL: Record<string, string> = {
   ugc: "UGC",
 };
 const TYPE_ORDER: AssetType[] = ["pdp", "paid_social", "ugc"];
+
+type TabKey = "brief" | "teams" | "assets" | "hub";
+const TABS: { key: TabKey; label: string }[] = [
+  { key: "brief", label: "Brief" },
+  { key: "teams", label: "By team" },
+  { key: "assets", label: "Assets" },
+  { key: "hub", label: "Olivia hub" },
+];
 
 function emptyBrief(style_number: number): StyleBrief {
   return {
@@ -89,6 +105,14 @@ export function BriefsEditor({
   const [styleNumber, setStyleNumber] = useState<number>(
     styles[0]?.style_number ?? 0,
   );
+  const [tab, setTab] = useState<TabKey>("brief");
+  const [search, setSearch] = useState("");
+  const [collapsed, setCollapsed] = useState<Record<BriefStatus, boolean>>({
+    draft: false,
+    ready: false,
+    delivered: false,
+  });
+
   const [briefMap, setBriefMap] = useState<Record<number, StyleBrief>>(() => {
     const m: Record<number, StyleBrief> = {};
     for (const b of briefs) m[b.style_number] = b;
@@ -110,6 +134,7 @@ export function BriefsEditor({
     team: "", // "" = all teams
   });
   const [uploading, setUploading] = useState(false);
+  const [assetTeam, setAssetTeam] = useState(""); // "" = all teams
 
   const BUCKET = "brief-assets";
   const isImageLink = (l: BriefLink) =>
@@ -137,19 +162,27 @@ export function BriefsEditor({
   const brief = briefMap[styleNumber] ?? emptyBrief(styleNumber);
   const teamList = teamsByStyle[styleNumber] ?? [];
   const teams = teamList.map((t) => t.team);
-  const styleName =
-    styles.find((s) => s.style_number === styleNumber)?.name ?? "";
+  const style = styles.find((s) => s.style_number === styleNumber);
+  const styleName = style?.name ?? "";
   const styleLinks = linkList.filter((l) => l.style_number === styleNumber);
 
   // Per-team override helpers. A blank override inherits the style default.
   const pbOf = (productId: number) =>
     pbMap[productId] ?? emptyProductBrief(productId);
-  const eff = (productId: number, field: keyof ProductBrief, fallback: string) => {
+  const eff = (
+    productId: number,
+    field: keyof ProductBrief,
+    fallback: string,
+  ) => {
     const v = (pbMap[productId]?.[field] as string | null | undefined) ?? "";
     return v.trim() ? v : fallback;
   };
 
-  function setPbField(productId: number, field: keyof ProductBrief, value: string) {
+  function setPbField(
+    productId: number,
+    field: keyof ProductBrief,
+    value: string,
+  ) {
     setPbMap((m) => ({
       ...m,
       [productId]: { ...pbOf(productId), [field]: value },
@@ -177,12 +210,18 @@ export function BriefsEditor({
   function setField(field: keyof StyleBrief, value: string) {
     setBriefMap((m) => ({
       ...m,
-      [styleNumber]: { ...(m[styleNumber] ?? emptyBrief(styleNumber)), [field]: value },
+      [styleNumber]: {
+        ...(m[styleNumber] ?? emptyBrief(styleNumber)),
+        [field]: value,
+      },
     }));
   }
 
   async function saveBrief(next?: Partial<StyleBrief>) {
-    const current = { ...(briefMap[styleNumber] ?? emptyBrief(styleNumber)), ...next };
+    const current = {
+      ...(briefMap[styleNumber] ?? emptyBrief(styleNumber)),
+      ...next,
+    };
     setErr(null);
     const { error } = await supabase.from("style_briefs").upsert(
       {
@@ -204,7 +243,10 @@ export function BriefsEditor({
   async function setStatus(status: BriefStatus) {
     setBriefMap((m) => ({
       ...m,
-      [styleNumber]: { ...(m[styleNumber] ?? emptyBrief(styleNumber)), status },
+      [styleNumber]: {
+        ...(m[styleNumber] ?? emptyBrief(styleNumber)),
+        status,
+      },
     }));
     await saveBrief({ status });
   }
@@ -331,7 +373,9 @@ export function BriefsEditor({
       lines.push("PER-TEAM MODEL & ENVIRONMENT:");
       for (const t of teamList) {
         lines.push(`  ${t.team}:`);
-        lines.push(`    Model: ${eff(t.product_id, "model_notes", brief.model_notes?.trim() || "—")}`);
+        lines.push(
+          `    Model: ${eff(t.product_id, "model_notes", brief.model_notes?.trim() || "—")}`,
+        );
         lines.push(
           `    Environment: ${eff(t.product_id, "lifestyle_environment", brief.lifestyle_environment?.trim() || "—")}`,
         );
@@ -367,7 +411,7 @@ export function BriefsEditor({
 
   const shots = shotsByStyle.get(styleNumber) ?? [];
 
-  // Coverage overview across every style (live as you edit).
+  // Coverage overview across every style (live as you edit). Powers the rail.
   const overview = useMemo(
     () =>
       styles.map((s) => {
@@ -388,6 +432,31 @@ export function BriefsEditor({
       }),
     [styles, briefMap, linkList, teamsByStyle],
   );
+
+  const counts = useMemo(() => {
+    const c: Record<BriefStatus, number> = { draft: 0, ready: 0, delivered: 0 };
+    for (const o of overview) c[o.status]++;
+    return c;
+  }, [overview]);
+
+  // Group the rail like a Monday board: by status, filtered by the search box.
+  const railGroups = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const groups: Record<BriefStatus, typeof overview> = {
+      draft: [],
+      ready: [],
+      delivered: [],
+    };
+    for (const o of overview) {
+      if (
+        q &&
+        !`${o.s.style_number} ${o.s.name}`.toLowerCase().includes(q)
+      )
+        continue;
+      groups[o.status].push(o);
+    }
+    return groups;
+  }, [overview, search]);
 
   function exportCsv() {
     const rows: string[][] = [
@@ -423,480 +492,802 @@ export function BriefsEditor({
           : "bg-neutralbg text-neutral border-[#d8d1c2]"
     }`;
 
+  const assetLinks =
+    assetTeam === ""
+      ? styleLinks
+      : styleLinks.filter((l) => !l.team || l.team === assetTeam);
+
   return (
-    <div className="max-w-4xl">
-      {/* Coverage overview — all briefs at a glance */}
-      <details className="mb-5 border border-line rounded-lg bg-white" open>
-        <summary className="cursor-pointer px-3 py-2 flex items-center gap-2">
-          <span className="font-disp uppercase font-bold text-base">
-            Coverage — all briefs
-          </span>
-          <span className="font-mono text-[10px] text-muted">
-            {overview.filter((o) => o.status === "delivered").length} delivered ·{" "}
-            {overview.filter((o) => o.status === "ready").length} ready ·{" "}
-            {overview.filter((o) => o.status === "draft").length} draft
-          </span>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              exportCsv();
-            }}
-            className="ml-auto font-mono text-[10px] uppercase tracking-[0.06em]
-              px-2.5 py-1 rounded border border-line text-muted hover:text-ink"
-          >
-            Export CSV
-          </button>
-        </summary>
-        <div className="max-h-72 overflow-auto border-t border-line">
-          <table className="w-full border-collapse">
-            <thead className="sticky top-0 bg-paper">
-              <tr>
-                <th className="th">Style</th>
-                <th className="th text-center">Status</th>
-                <th className="th text-center">Fields</th>
-                <th className="th text-center">Links</th>
-                <th className="th text-center">Teams</th>
-              </tr>
-            </thead>
-            <tbody>
-              {overview.map((o) => (
-                <tr
-                  key={o.s.style_number}
-                  onClick={() => {
-                    setStyleNumber(o.s.style_number);
-                    setMsg(null);
-                    setErr(null);
-                  }}
-                  className={`cursor-pointer hover:bg-[#fbf9f4] ${
-                    o.s.style_number === styleNumber ? "bg-[#fbf9f4]" : ""
-                  }`}
-                >
-                  <td className="px-2 py-1.5 border-b border-line text-sm">
-                    <span className="font-mono text-[11px] text-muted mr-1">
-                      {o.s.style_number}
-                    </span>
-                    {o.s.name}
-                    {o.s.is_hero ? " ★" : ""}
-                  </td>
-                  <td className="px-2 py-1.5 border-b border-line text-center">
-                    <span className={statusPill(o.status)}>
-                      {STATUS_LABEL[o.status]}
-                    </span>
-                  </td>
-                  <td className="px-2 py-1.5 border-b border-line text-center font-mono text-[11px]">
-                    {o.filled}/4
-                  </td>
-                  <td className="px-2 py-1.5 border-b border-line text-center font-mono text-[11px]">
-                    {o.linkCount}
-                  </td>
-                  <td className="px-2 py-1.5 border-b border-line text-center font-mono text-[11px]">
-                    {o.teamCount}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </details>
-
-      {/* Style picker + status */}
-      <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <label className="font-mono text-[11px] uppercase tracking-[0.06em] text-muted">
-          Style
-        </label>
-        <select
-          value={styleNumber}
-          onChange={(e) => {
-            setStyleNumber(Number(e.target.value));
-            setMsg(null);
-            setErr(null);
-          }}
-          className="text-sm px-2.5 py-1.5 border border-line rounded bg-white
-            focus:outline-none focus:border-gold min-w-[280px]"
-        >
-          {styles.map((s) => (
-            <option key={s.style_number} value={s.style_number}>
-              {s.style_number} — {s.name}
-              {s.is_hero ? " ★" : ""}
-            </option>
-          ))}
-        </select>
-
-        <div className="flex border border-line rounded overflow-hidden ml-auto">
-          {(["draft", "ready", "delivered"] as BriefStatus[]).map((st) => (
+    <div className="flex flex-col lg:flex-row gap-5 items-start">
+      {/* ─────────────── Left rail: the style board ─────────────── */}
+      <aside className="w-full lg:w-[280px] lg:shrink-0 border border-line rounded-lg bg-white lg:sticky lg:top-4 overflow-hidden">
+        <div className="px-3 pt-3 pb-2 border-b border-line">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="font-disp uppercase font-bold text-base">
+              Styles
+            </span>
+            <span className="font-mono text-[10px] text-muted">
+              {styles.length}
+            </span>
             <button
-              key={st}
               type="button"
-              onClick={() => setStatus(st)}
-              className={`font-mono text-[10px] uppercase tracking-[0.04em] px-2.5 py-1.5
-                ${
-                  brief.status === st
-                    ? st === "ready"
-                      ? "bg-warn text-white"
-                      : st === "delivered"
-                        ? "bg-ok text-white"
-                        : "bg-ink text-white"
-                    : "bg-white text-muted hover:text-ink"
-                }`}
+              onClick={exportCsv}
+              className="ml-auto font-mono text-[9px] uppercase tracking-[0.06em]
+                px-2 py-1 rounded border border-line text-muted hover:text-ink"
             >
-              {STATUS_LABEL[st]}
+              Export CSV
             </button>
-          ))}
-        </div>
-        <button
-          type="button"
-          onClick={copyBrief}
-          className="font-mono text-[10px] uppercase tracking-[0.06em] px-3 py-1.5
-            rounded border border-gold text-ink hover:bg-gold/20"
-        >
-          Copy brief for Olivia
-        </button>
-      </div>
-
-      {teams.length > 0 && (
-        <p className="font-mono text-[10px] text-muted mb-3">
-          Teams running this style: {teams.join(" · ")}
-        </p>
-      )}
-
-      {err && (
-        <p className="text-sm text-bad bg-badbg border border-[#e7c0cb] rounded p-2 mb-3">
-          {err}
-        </p>
-      )}
-      {msg && (
-        <p className="text-sm text-ok bg-okbg border border-[#a9dcc2] rounded p-2 mb-3">
-          {msg}
-        </p>
-      )}
-
-      <div className="grid md:grid-cols-2 gap-4">
-        {/* Left: brief fields */}
-        <div className="space-y-4">
-          <Field
-            label="Model to use (default — all teams)"
-            placeholder="Default model / look. Override per team below if it differs…"
-            value={brief.model_notes ?? ""}
-            onChange={(v) => setField("model_notes", v)}
-            onBlur={() => saveBrief()}
-          />
-          <Field
-            label="Lifestyle shot environment (default — all teams)"
-            placeholder="Default setting / backdrop. Override per team below if it differs…"
-            value={brief.lifestyle_environment ?? ""}
-            onChange={(v) => setField("lifestyle_environment", v)}
-            onBlur={() => saveBrief()}
-          />
-          <Field
-            label="Model styling (outside the product)"
-            placeholder="How the model is styled around the product — bottoms, shoes, hair, accessories…"
-            value={brief.model_styling_notes ?? ""}
-            onChange={(v) => setField("model_styling_notes", v)}
-            onBlur={() => saveBrief()}
-          />
-          <Field
-            label="Product look & feel"
-            placeholder="Fabric, fit, drape, texture — context so the AI knows the product…"
-            value={brief.product_feel_notes ?? ""}
-            onChange={(v) => setField("product_feel_notes", v)}
-            onBlur={() => saveBrief()}
-          />
-          <Field
-            label="Other notes"
-            placeholder="Anything else Olivia needs…"
-            value={brief.extra_notes ?? ""}
-            onChange={(v) => setField("extra_notes", v)}
-            onBlur={() => saveBrief()}
-          />
-        </div>
-
-        {/* Right: shots needed + links */}
-        <div className="space-y-4">
-          <div className="border border-line rounded-lg bg-white p-3">
-            <div className="font-disp uppercase font-bold text-base mb-1">
-              PDP shots needed
-            </div>
-            <p className="font-mono text-[10px] text-muted mb-2">
-              Pulled live from this style&apos;s requirements (edit on the
-              Requirements page).
-            </p>
-            {shots.length === 0 ? (
-              <p className="text-sm text-muted">No shots set for this style.</p>
-            ) : (
-              TYPE_ORDER.map((type) => {
-                const inType = shots.filter((s) => s.slot.asset_type === type);
-                if (!inType.length) return null;
-                return (
-                  <div key={type} className="mb-2">
-                    <div className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted">
-                      {TYPE_LABEL[type]}
-                    </div>
-                    <div className="flex flex-wrap gap-1.5 mt-1">
-                      {inType.map((s) => (
-                        <span
-                          key={s.slot.id}
-                          className={`font-mono text-[11px] px-2 py-0.5 rounded border ${
-                            s.required
-                              ? "border-line"
-                              : "border-dashed border-line text-muted"
-                          }`}
-                        >
-                          {s.slot.label}
-                          {s.required ? "" : " (opt)"}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })
-            )}
           </div>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search style # or name…"
+            className="w-full text-[12px] px-2.5 py-1.5 border border-line rounded
+              focus:outline-none focus:border-gold"
+          />
+          <div className="flex gap-3 mt-2 font-mono text-[10px] text-muted">
+            <span>
+              <span className="text-warn">●</span> {counts.ready} ready
+            </span>
+            <span>
+              <span className="text-neutral">●</span> {counts.draft} draft
+            </span>
+            <span>
+              <span className="text-ok">●</span> {counts.delivered} done
+            </span>
+          </div>
+        </div>
 
-          {/* Links */}
-          <div className="border border-line rounded-lg bg-white p-3">
-            <div className="font-disp uppercase font-bold text-base mb-2">
-              Styling guides & assets
-            </div>
-
-            {styleLinks.length === 0 && (
-              <p className="text-sm text-muted mb-2">
-                No links yet. Add Google Slides styling guides, Drive product
-                photos, model refs, or PDFs below.
-              </p>
-            )}
-
-            {KIND_ORDER.map((kind) => {
-              const inKind = styleLinks.filter((l) => l.kind === kind);
-              if (!inKind.length) return null;
-              return (
-                <div key={kind} className="mb-2.5">
-                  <div className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted mb-1">
-                    {KIND_LABEL[kind]}
-                  </div>
-                  <ul className="space-y-1">
-                    {inKind.map((l) => (
-                      <li
-                        key={l.id}
-                        className="flex items-center gap-2 text-sm"
-                      >
-                        {isImageLink(l) && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <a href={l.url} target="_blank" rel="noopener noreferrer">
-                            <img
-                              src={l.url}
-                              alt={l.title}
-                              className="w-8 h-8 object-cover rounded border border-line shrink-0"
-                            />
-                          </a>
-                        )}
-                        <a
-                          href={l.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-ink underline truncate"
-                          title={l.url}
-                        >
-                          {l.title}
-                        </a>
-                        {l.storage_path && (
-                          <span className="font-mono text-[9px] uppercase text-gold shrink-0">
-                            uploaded
-                          </span>
-                        )}
-                        {l.team && (
-                          <span className="font-mono text-[9px] uppercase bg-paper border border-line rounded px-1 py-0.5 text-muted shrink-0">
-                            {l.team}
-                          </span>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => deleteLink(l)}
-                          title="Delete link"
-                          className="ml-auto text-muted hover:text-bad shrink-0"
-                        >
-                          🗑
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              );
-            })}
-
-            {/* Add link */}
-            <div className="border-t border-line pt-2.5 mt-1 space-y-2">
-              <div className="flex gap-2">
-                <select
-                  value={newLink.kind}
-                  onChange={(e) =>
-                    setNewLink((n) => ({
-                      ...n,
-                      kind: e.target.value as BriefLinkKind,
-                    }))
-                  }
-                  className="text-[12px] px-2 py-1.5 border border-line rounded bg-white
-                    focus:outline-none focus:border-gold"
-                >
-                  {KIND_ORDER.map((k) => (
-                    <option key={k} value={k}>
-                      {KIND_LABEL[k]}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={newLink.team}
-                  onChange={(e) =>
-                    setNewLink((n) => ({ ...n, team: e.target.value }))
-                  }
-                  className="text-[12px] px-2 py-1.5 border border-line rounded bg-white
-                    focus:outline-none focus:border-gold flex-1 min-w-0"
-                >
-                  <option value="">All teams</option>
-                  {teams.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <input
-                value={newLink.title}
-                onChange={(e) =>
-                  setNewLink((n) => ({ ...n, title: e.target.value }))
-                }
-                placeholder="Label (optional)"
-                className="w-full text-[12px] px-2 py-1.5 border border-line rounded
-                  focus:outline-none focus:border-gold"
-              />
-              <div className="flex gap-2">
-                <input
-                  value={newLink.url}
-                  onChange={(e) =>
-                    setNewLink((n) => ({ ...n, url: e.target.value }))
-                  }
-                  onKeyDown={(e) => e.key === "Enter" && addLink()}
-                  placeholder="Paste Google Slides / Drive / PDF URL…"
-                  className="flex-1 min-w-0 text-[12px] px-2 py-1.5 border border-line rounded
-                    focus:outline-none focus:border-gold"
-                />
+        <div className="max-h-[70vh] overflow-auto">
+          {STATUS_ORDER.map((status) => {
+            const rows = railGroups[status];
+            if (!rows.length) return null;
+            const isCollapsed = collapsed[status];
+            return (
+              <div key={status}>
                 <button
                   type="button"
-                  disabled={!newLink.url.trim()}
-                  onClick={addLink}
-                  className="font-mono text-[10px] uppercase tracking-[0.04em] px-3 py-1.5
-                    rounded bg-ink text-white disabled:opacity-40"
+                  onClick={() =>
+                    setCollapsed((c) => ({ ...c, [status]: !c[status] }))
+                  }
+                  className="w-full flex items-center gap-2 px-3 py-1.5 bg-paper
+                    border-b border-line text-left"
                 >
-                  + Add
-                </button>
-              </div>
-
-              {/* Or upload a file instead of pasting a URL */}
-              <div className="flex items-center gap-2">
-                <label
-                  className={`font-mono text-[10px] uppercase tracking-[0.04em] px-3 py-1.5
-                    rounded border border-line cursor-pointer hover:border-gold
-                    ${uploading ? "opacity-50 pointer-events-none" : "text-ink"}`}
-                >
-                  {uploading ? "Uploading…" : "⬆ Upload PNG / JPG"}
-                  <input
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp,image/gif"
-                    className="hidden"
-                    disabled={uploading}
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) uploadFile(f);
-                      e.target.value = "";
-                    }}
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[status]}`}
                   />
-                </label>
-                <span className="font-mono text-[9px] text-muted">
-                  uses the kind &amp; team selected above
-                </span>
+                  <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted">
+                    {STATUS_LABEL[status]}
+                  </span>
+                  <span className="font-mono text-[10px] text-muted ml-auto">
+                    {rows.length} {isCollapsed ? "▸" : "▾"}
+                  </span>
+                </button>
+                {!isCollapsed &&
+                  rows.map((o) => {
+                    const on = o.s.style_number === styleNumber;
+                    return (
+                      <button
+                        key={o.s.style_number}
+                        type="button"
+                        onClick={() => {
+                          setStyleNumber(o.s.style_number);
+                          setMsg(null);
+                          setErr(null);
+                        }}
+                        className={`w-full text-left px-3 py-2 border-b border-line border-l-2
+                          ${
+                            on
+                              ? "bg-[#fbf9f4] border-l-gold"
+                              : "border-l-transparent hover:bg-[#fbf9f4]"
+                          }`}
+                      >
+                        <div className="flex items-baseline gap-1.5">
+                          <span className="font-mono text-[10px] text-muted">
+                            {o.s.style_number}
+                          </span>
+                          <span className="text-sm truncate flex-1">
+                            {o.s.name}
+                          </span>
+                          {o.s.is_hero && (
+                            <span className="text-gold text-[11px]">★</span>
+                          )}
+                        </div>
+                        <div className="mt-1.5 h-1 bg-line rounded overflow-hidden">
+                          <div
+                            className="h-1 bg-gold rounded"
+                            style={{ width: `${(o.filled / 4) * 100}%` }}
+                          />
+                        </div>
+                        <div className="mt-1 font-mono text-[9px] text-muted">
+                          {o.filled}/4 fields · {o.linkCount} links ·{" "}
+                          {o.teamCount} team{o.teamCount === 1 ? "" : "s"}
+                        </div>
+                      </button>
+                    );
+                  })}
               </div>
+            );
+          })}
+          {STATUS_ORDER.every((s) => railGroups[s].length === 0) && (
+            <p className="px-3 py-4 text-sm text-muted">No styles match.</p>
+          )}
+        </div>
+      </aside>
+
+      {/* ─────────────── Right pane: the selected record ─────────────── */}
+      <section className="flex-1 min-w-0 w-full">
+        {/* Record header */}
+        <div className="border border-line rounded-lg bg-white p-4 mb-4">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div className="min-w-0">
+              <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted">
+                Style {styleNumber}
+                {style?.is_hero ? " · Hero ★" : ""}
+              </div>
+              <h2 className="font-disp font-bold uppercase text-[26px] leading-[0.95] mt-0.5 truncate">
+                {styleName || "—"}
+              </h2>
+              {teams.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {teams.map((t) => (
+                    <span
+                      key={t}
+                      className="font-mono text-[10px] uppercase bg-paper border border-line
+                        rounded px-2 py-0.5 text-muted"
+                    >
+                      {t}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col items-end gap-2">
+              <div className="flex border border-line rounded overflow-hidden">
+                {(["draft", "ready", "delivered"] as BriefStatus[]).map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setStatus(st)}
+                    className={`font-mono text-[10px] uppercase tracking-[0.04em] px-2.5 py-1.5
+                      ${
+                        brief.status === st
+                          ? st === "ready"
+                            ? "bg-warn text-white"
+                            : st === "delivered"
+                              ? "bg-ok text-white"
+                              : "bg-ink text-white"
+                          : "bg-white text-muted hover:text-ink"
+                      }`}
+                  >
+                    {STATUS_LABEL[st]}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={copyBrief}
+                className="font-mono text-[10px] uppercase tracking-[0.06em] px-3 py-1.5
+                  rounded border border-gold text-ink hover:bg-gold/20"
+              >
+                Copy brief for Olivia
+              </button>
             </div>
           </div>
-        </div>
-      </div>
 
-      {/* Per-team model & environment overrides */}
-      <details className="mt-5 border border-line rounded-lg bg-white" open>
-        <summary className="cursor-pointer px-3 py-2 font-disp uppercase font-bold text-base">
-          Per-team details
-          <span className="font-mono text-[10px] font-normal normal-case text-muted ml-2">
-            {teamList.length} team{teamList.length === 1 ? "" : "s"} on this
-            style · blank inherits the default above
-          </span>
-        </summary>
-        <div className="max-h-[28rem] overflow-auto border-t border-line">
-          <table className="w-full border-collapse">
-            <thead className="sticky top-0 bg-paper">
-              <tr>
-                <th className="th">Team</th>
-                <th className="th">Model</th>
-                <th className="th">Lifestyle environment</th>
-                <th className="th">Styling (override)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {teamList.map((t) => (
-                <tr key={t.product_id} className="align-top">
-                  <td className="px-2 py-1.5 border-b border-line text-sm font-semibold whitespace-nowrap">
-                    {t.team}
-                  </td>
-                  {(
-                    [
-                      ["model_notes", brief.model_notes],
-                      ["lifestyle_environment", brief.lifestyle_environment],
-                      ["model_styling_notes", null],
-                    ] as [keyof ProductBrief, string | null][]
-                  ).map(([field, def]) => (
-                    <td key={field} className="px-2 py-1.5 border-b border-line">
-                      <textarea
-                        rows={2}
-                        value={(pbMap[t.product_id]?.[field] as string) ?? ""}
-                        placeholder={
-                          def && def.trim()
-                            ? `Default: ${def.trim()}`
-                            : field === "model_styling_notes"
-                              ? "(optional)"
-                              : "Set a default above…"
+          {/* Tab bar */}
+          <div className="flex gap-1 mt-4 -mb-px">
+            {TABS.map((t) => {
+              const count =
+                t.key === "teams"
+                  ? teamList.length
+                  : t.key === "assets"
+                    ? styleLinks.length
+                    : t.key === "brief"
+                      ? shots.length
+                      : undefined;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setTab(t.key)}
+                  className={`font-mono text-[11px] uppercase tracking-[0.06em] px-3 py-2 rounded-t border
+                    ${
+                      tab === t.key
+                        ? "bg-paper border-line border-b-paper text-ink"
+                        : "bg-transparent border-transparent text-muted hover:text-ink"
+                    }`}
+                >
+                  {t.label}
+                  {count !== undefined && (
+                    <span className="ml-1.5 text-muted">{count}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {err && (
+          <p className="text-sm text-bad bg-badbg border border-[#e7c0cb] rounded p-2 mb-3">
+            {err}
+          </p>
+        )}
+        {msg && (
+          <p className="text-sm text-ok bg-okbg border border-[#a9dcc2] rounded p-2 mb-3">
+            {msg}
+          </p>
+        )}
+
+        {/* ─────────── Tab: Brief (style-level defaults) ─────────── */}
+        {tab === "brief" && (
+          <div className="grid lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2 space-y-4">
+              <SectionCard
+                title="Defaults — apply to all teams"
+                subtitle="Set the baseline here. Any team can override Model & Environment on the “By team” tab."
+              >
+                <div className="space-y-4">
+                  <Field
+                    label="Model to use"
+                    badge="Overridable per team"
+                    placeholder="Default model / look for this style…"
+                    value={brief.model_notes ?? ""}
+                    onChange={(v) => setField("model_notes", v)}
+                    onBlur={() => saveBrief()}
+                  />
+                  <Field
+                    label="Lifestyle shot environment"
+                    badge="Overridable per team"
+                    placeholder="Default setting / backdrop for lifestyle shots…"
+                    value={brief.lifestyle_environment ?? ""}
+                    onChange={(v) => setField("lifestyle_environment", v)}
+                    onBlur={() => saveBrief()}
+                  />
+                </div>
+              </SectionCard>
+
+              <SectionCard
+                title="Styling & product context"
+                subtitle="Shared context so Olivia understands the product itself."
+              >
+                <div className="space-y-4">
+                  <Field
+                    label="Model styling (outside the product)"
+                    placeholder="Bottoms, shoes, hair, accessories styled around the product…"
+                    value={brief.model_styling_notes ?? ""}
+                    onChange={(v) => setField("model_styling_notes", v)}
+                    onBlur={() => saveBrief()}
+                  />
+                  <Field
+                    label="Product look & feel"
+                    placeholder="Fabric, fit, drape, texture — context so the AI knows the product…"
+                    value={brief.product_feel_notes ?? ""}
+                    onChange={(v) => setField("product_feel_notes", v)}
+                    onBlur={() => saveBrief()}
+                  />
+                  <Field
+                    label="Other notes"
+                    placeholder="Anything else Olivia needs…"
+                    value={brief.extra_notes ?? ""}
+                    onChange={(v) => setField("extra_notes", v)}
+                    onBlur={() => saveBrief()}
+                  />
+                </div>
+              </SectionCard>
+            </div>
+
+            {/* Shots needed */}
+            <div className="space-y-4">
+              <SectionCard
+                title="PDP shots needed"
+                subtitle="Live from this style’s requirements (edit on the Requirements page)."
+              >
+                {shots.length === 0 ? (
+                  <p className="text-sm text-muted">
+                    No shots set for this style.
+                  </p>
+                ) : (
+                  TYPE_ORDER.map((type) => {
+                    const inType = shots.filter(
+                      (s) => s.slot.asset_type === type,
+                    );
+                    if (!inType.length) return null;
+                    return (
+                      <div key={type} className="mb-3 last:mb-0">
+                        <div className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted mb-1.5">
+                          {TYPE_LABEL[type]}
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {inType.map((s) => (
+                            <span
+                              key={s.slot.id}
+                              className={`font-mono text-[11px] px-2 py-0.5 rounded border ${
+                                s.required
+                                  ? "border-line"
+                                  : "border-dashed border-line text-muted"
+                              }`}
+                            >
+                              {s.slot.label}
+                              {s.required ? "" : " (opt)"}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </SectionCard>
+            </div>
+          </div>
+        )}
+
+        {/* ─────────── Tab: By team (per-product overrides) ─────────── */}
+        {tab === "teams" && (
+          <div>
+            <p className="text-sm text-muted mb-3">
+              One card per team running this style. Leave a field blank to
+              inherit the default from the <b>Brief</b> tab.
+            </p>
+            {teamList.length === 0 ? (
+              <div className="border border-line rounded-lg bg-white p-6 text-center text-sm text-muted">
+                No teams run this style yet.
+              </div>
+            ) : (
+              <div className="grid md:grid-cols-2 gap-4">
+                {teamList.map((t) => (
+                  <div
+                    key={t.product_id}
+                    className="border border-line rounded-lg bg-white p-3"
+                  >
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="font-disp uppercase font-bold text-base">
+                        {t.team}
+                      </span>
+                      <span className="font-mono text-[9px] uppercase text-muted border border-line rounded px-1.5 py-0.5">
+                        product #{t.product_id}
+                      </span>
+                    </div>
+                    <div className="space-y-3">
+                      <OverrideField
+                        label="Model"
+                        def={brief.model_notes ?? ""}
+                        value={
+                          (pbMap[t.product_id]?.model_notes as string) ?? ""
                         }
-                        onChange={(e) =>
-                          setPbField(t.product_id, field, e.target.value)
+                        onChange={(v) =>
+                          setPbField(t.product_id, "model_notes", v)
                         }
                         onBlur={() => savePb(t.product_id)}
-                        className="w-full text-[12px] px-2 py-1 border border-line rounded
-                          focus:outline-none focus:border-gold resize-y"
                       />
-                    </td>
-                  ))}
-                </tr>
-              ))}
-              {teamList.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="px-3 py-3 text-sm text-muted">
-                    No teams run this style.
-                  </td>
-                </tr>
+                      <OverrideField
+                        label="Lifestyle environment"
+                        def={brief.lifestyle_environment ?? ""}
+                        value={
+                          (pbMap[t.product_id]
+                            ?.lifestyle_environment as string) ?? ""
+                        }
+                        onChange={(v) =>
+                          setPbField(t.product_id, "lifestyle_environment", v)
+                        }
+                        onBlur={() => savePb(t.product_id)}
+                      />
+                      <OverrideField
+                        label="Styling (optional)"
+                        def={brief.model_styling_notes ?? ""}
+                        value={
+                          (pbMap[t.product_id]
+                            ?.model_styling_notes as string) ?? ""
+                        }
+                        onChange={(v) =>
+                          setPbField(t.product_id, "model_styling_notes", v)
+                        }
+                        onBlur={() => savePb(t.product_id)}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ─────────── Tab: Assets & links ─────────── */}
+        {tab === "assets" && (
+          <div className="space-y-4">
+            {/* Add panel */}
+            <SectionCard
+              title="Add a styling guide, photo set, ref or PDF"
+              subtitle="Paste a Google Slides / Drive / PDF URL, or upload a PNG/JPG. Tag it to a team or leave it for all."
+            >
+              <div className="space-y-2">
+                <div className="flex gap-2 flex-wrap">
+                  <select
+                    value={newLink.kind}
+                    onChange={(e) =>
+                      setNewLink((n) => ({
+                        ...n,
+                        kind: e.target.value as BriefLinkKind,
+                      }))
+                    }
+                    className="text-[12px] px-2 py-1.5 border border-line rounded bg-white
+                      focus:outline-none focus:border-gold"
+                  >
+                    {KIND_ORDER.map((k) => (
+                      <option key={k} value={k}>
+                        {KIND_LABEL[k]}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={newLink.team}
+                    onChange={(e) =>
+                      setNewLink((n) => ({ ...n, team: e.target.value }))
+                    }
+                    className="text-[12px] px-2 py-1.5 border border-line rounded bg-white
+                      focus:outline-none focus:border-gold"
+                  >
+                    <option value="">All teams</option>
+                    {teams.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    value={newLink.title}
+                    onChange={(e) =>
+                      setNewLink((n) => ({ ...n, title: e.target.value }))
+                    }
+                    placeholder="Label (optional)"
+                    className="flex-1 min-w-[140px] text-[12px] px-2 py-1.5 border border-line rounded
+                      focus:outline-none focus:border-gold"
+                  />
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  <input
+                    value={newLink.url}
+                    onChange={(e) =>
+                      setNewLink((n) => ({ ...n, url: e.target.value }))
+                    }
+                    onKeyDown={(e) => e.key === "Enter" && addLink()}
+                    placeholder="Paste Google Slides / Drive / PDF URL…"
+                    className="flex-1 min-w-[200px] text-[12px] px-2 py-1.5 border border-line rounded
+                      focus:outline-none focus:border-gold"
+                  />
+                  <button
+                    type="button"
+                    disabled={!newLink.url.trim()}
+                    onClick={addLink}
+                    className="font-mono text-[10px] uppercase tracking-[0.04em] px-3 py-1.5
+                      rounded bg-ink text-white disabled:opacity-40"
+                  >
+                    + Add link
+                  </button>
+                  <label
+                    className={`font-mono text-[10px] uppercase tracking-[0.04em] px-3 py-1.5
+                      rounded border border-line cursor-pointer hover:border-gold
+                      ${uploading ? "opacity-50 pointer-events-none" : "text-ink"}`}
+                  >
+                    {uploading ? "Uploading…" : "⬆ Upload PNG / JPG"}
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      className="hidden"
+                      disabled={uploading}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) uploadFile(f);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+            </SectionCard>
+
+            {/* Filter + grouped library */}
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted">
+                Showing
+              </span>
+              <select
+                value={assetTeam}
+                onChange={(e) => setAssetTeam(e.target.value)}
+                className="text-[12px] px-2 py-1 border border-line rounded bg-white
+                  focus:outline-none focus:border-gold"
+              >
+                <option value="">All teams</option>
+                {teams.map((t) => (
+                  <option key={t} value={t}>
+                    {t} (+ shared)
+                  </option>
+                ))}
+              </select>
+              <span className="font-mono text-[10px] text-muted">
+                {assetLinks.length} item{assetLinks.length === 1 ? "" : "s"}
+              </span>
+            </div>
+
+            {assetLinks.length === 0 ? (
+              <div className="border border-line rounded-lg bg-white p-6 text-center text-sm text-muted">
+                No assets yet. Add styling guides, product photos, model refs or
+                PDFs above.
+              </div>
+            ) : (
+              <div className="grid md:grid-cols-2 gap-4">
+                {KIND_ORDER.map((kind) => {
+                  const inKind = assetLinks.filter((l) => l.kind === kind);
+                  if (!inKind.length) return null;
+                  return (
+                    <SectionCard key={kind} title={KIND_LABEL[kind]}>
+                      <ul className="space-y-1.5">
+                        {inKind.map((l) => (
+                          <li
+                            key={l.id}
+                            className="flex items-center gap-2 text-sm"
+                          >
+                            {isImageLink(l) && (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <a
+                                href={l.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                <img
+                                  src={l.url}
+                                  alt={l.title}
+                                  className="w-9 h-9 object-cover rounded border border-line shrink-0"
+                                />
+                              </a>
+                            )}
+                            <a
+                              href={l.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-ink underline truncate"
+                              title={l.url}
+                            >
+                              {l.title}
+                            </a>
+                            {l.storage_path && (
+                              <span className="font-mono text-[9px] uppercase text-gold shrink-0">
+                                uploaded
+                              </span>
+                            )}
+                            {l.team && (
+                              <span className="font-mono text-[9px] uppercase bg-paper border border-line rounded px-1 py-0.5 text-muted shrink-0">
+                                {l.team}
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => deleteLink(l)}
+                              title="Delete link"
+                              className="ml-auto text-muted hover:text-bad shrink-0"
+                            >
+                              🗑
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </SectionCard>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ─────────── Tab: Olivia hub (read-only deliverable) ─────────── */}
+        {tab === "hub" && (
+          <div className="border border-line rounded-lg bg-white">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-line">
+              <div>
+                <div className="font-disp uppercase font-bold text-lg leading-none">
+                  Everything to shoot Style {styleNumber}
+                </div>
+                <p className="font-mono text-[10px] text-muted mt-1">
+                  Read-only summary for the Olivia team — the brief, teams and
+                  assets in one place.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={copyBrief}
+                className="ml-auto font-mono text-[10px] uppercase tracking-[0.06em] px-3 py-1.5
+                  rounded border border-gold text-ink hover:bg-gold/20"
+              >
+                Copy as text
+              </button>
+            </div>
+
+            <div className="p-4 space-y-5">
+              {/* Shots */}
+              <HubSection title="Shots needed">
+                {shots.length === 0 ? (
+                  <p className="text-sm text-muted">No shots set.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-4">
+                    {TYPE_ORDER.map((type) => {
+                      const inType = shots.filter(
+                        (s) => s.slot.asset_type === type,
+                      );
+                      if (!inType.length) return null;
+                      return (
+                        <div key={type}>
+                          <div className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted mb-1">
+                            {TYPE_LABEL[type]}
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {inType.map((s) => (
+                              <span
+                                key={s.slot.id}
+                                className={`font-mono text-[11px] px-2 py-0.5 rounded border ${
+                                  s.required
+                                    ? "border-line"
+                                    : "border-dashed border-line text-muted"
+                                }`}
+                              >
+                                {s.slot.label}
+                                {s.required ? "" : " (opt)"}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </HubSection>
+
+              {/* Defaults */}
+              <HubSection title="The brief">
+                <dl className="grid sm:grid-cols-2 gap-x-6 gap-y-3">
+                  <HubField label="Model" value={brief.model_notes} />
+                  <HubField
+                    label="Lifestyle environment"
+                    value={brief.lifestyle_environment}
+                  />
+                  <HubField
+                    label="Model styling"
+                    value={brief.model_styling_notes}
+                  />
+                  <HubField
+                    label="Product look & feel"
+                    value={brief.product_feel_notes}
+                  />
+                  {brief.extra_notes?.trim() && (
+                    <HubField label="Other notes" value={brief.extra_notes} />
+                  )}
+                </dl>
+              </HubSection>
+
+              {/* Per-team */}
+              {teamList.length > 0 && (
+                <HubSection title="By team">
+                  <div className="grid md:grid-cols-2 gap-3">
+                    {teamList.map((t) => {
+                      const model = eff(
+                        t.product_id,
+                        "model_notes",
+                        brief.model_notes?.trim() || "—",
+                      );
+                      const env = eff(
+                        t.product_id,
+                        "lifestyle_environment",
+                        brief.lifestyle_environment?.trim() || "—",
+                      );
+                      const styling = eff(
+                        t.product_id,
+                        "model_styling_notes",
+                        "",
+                      );
+                      return (
+                        <div
+                          key={t.product_id}
+                          className="border border-line rounded p-2.5"
+                        >
+                          <div className="font-disp uppercase font-bold text-sm mb-1.5">
+                            {t.team}
+                          </div>
+                          <dl className="space-y-1 text-sm">
+                            <HubInline label="Model" value={model} />
+                            <HubInline label="Environment" value={env} />
+                            {styling && (
+                              <HubInline label="Styling" value={styling} />
+                            )}
+                          </dl>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </HubSection>
               )}
-            </tbody>
-          </table>
-        </div>
-      </details>
+
+              {/* Resources */}
+              {styleLinks.length > 0 && (
+                <HubSection title="Resources & assets">
+                  <div className="space-y-3">
+                    {KIND_ORDER.map((kind) => {
+                      const inKind = styleLinks.filter((l) => l.kind === kind);
+                      if (!inKind.length) return null;
+                      return (
+                        <div key={kind}>
+                          <div className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted mb-1">
+                            {KIND_LABEL[kind]}
+                          </div>
+                          <ul className="flex flex-wrap gap-2">
+                            {inKind.map((l) => (
+                              <li key={l.id}>
+                                <a
+                                  href={l.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 text-sm text-ink underline
+                                    border border-line rounded px-2 py-1 hover:border-gold"
+                                  title={l.url}
+                                >
+                                  {l.title}
+                                  {l.team && (
+                                    <span className="font-mono text-[9px] uppercase text-muted no-underline">
+                                      [{l.team}]
+                                    </span>
+                                  )}
+                                </a>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </HubSection>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function SectionCard({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="border border-line rounded-lg bg-white p-4">
+      <div className="font-disp uppercase font-bold text-base leading-none">
+        {title}
+      </div>
+      {subtitle && (
+        <p className="font-mono text-[10px] text-muted mt-1 mb-3 leading-relaxed">
+          {subtitle}
+        </p>
+      )}
+      {!subtitle && <div className="mb-3" />}
+      {children}
     </div>
   );
 }
 
 function Field({
   label,
+  badge,
   placeholder,
   value,
   onChange,
   onBlur,
 }: {
   label: string;
+  badge?: string;
   placeholder: string;
   value: string;
   onChange: (v: string) => void;
@@ -904,9 +1295,16 @@ function Field({
 }) {
   return (
     <div>
-      <label className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted block mb-1">
-        {label}
-      </label>
+      <div className="flex items-center gap-2 mb-1">
+        <label className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted">
+          {label}
+        </label>
+        {badge && (
+          <span className="font-mono text-[8.5px] uppercase tracking-[0.04em] text-gold border border-gold/50 rounded px-1 py-0.5">
+            {badge}
+          </span>
+        )}
+      </div>
       <textarea
         value={value}
         placeholder={placeholder}
@@ -916,6 +1314,98 @@ function Field({
         className="w-full text-sm px-2.5 py-2 border border-line rounded bg-white
           focus:outline-none focus:border-gold resize-y"
       />
+    </div>
+  );
+}
+
+// A per-team field that visibly shows whether it's inheriting the style default
+// or overriding it.
+function OverrideField({
+  label,
+  def,
+  value,
+  onChange,
+  onBlur,
+}: {
+  label: string;
+  def: string;
+  value: string;
+  onChange: (v: string) => void;
+  onBlur: () => void;
+}) {
+  const overriding = value.trim().length > 0;
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        <label className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted">
+          {label}
+        </label>
+        <span
+          className={`font-mono text-[8.5px] uppercase tracking-[0.04em] px-1 py-0.5 rounded border ${
+            overriding
+              ? "text-gold border-gold/50"
+              : "text-muted border-line"
+          }`}
+        >
+          {overriding ? "Override" : "Inherited"}
+        </span>
+      </div>
+      <textarea
+        rows={2}
+        value={value}
+        placeholder={def.trim() ? `Inherit: ${def.trim()}` : "(none set)"}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
+        className="w-full text-[12px] px-2 py-1.5 border border-line rounded
+          focus:outline-none focus:border-gold resize-y"
+      />
+    </div>
+  );
+}
+
+function HubSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <div>
+      <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-gold border-b border-line pb-1 mb-2.5">
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function HubField({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | null;
+}) {
+  return (
+    <div>
+      <dt className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted">
+        {label}
+      </dt>
+      <dd className="text-sm mt-0.5 whitespace-pre-wrap">
+        {value && value.trim() ? value.trim() : <span className="text-muted">—</span>}
+      </dd>
+    </div>
+  );
+}
+
+function HubInline({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex gap-2">
+      <span className="font-mono text-[9px] uppercase tracking-[0.06em] text-muted shrink-0 w-20 pt-0.5">
+        {label}
+      </span>
+      <span className="whitespace-pre-wrap">{value}</span>
     </div>
   );
 }
