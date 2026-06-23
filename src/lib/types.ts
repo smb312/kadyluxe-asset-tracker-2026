@@ -116,3 +116,33 @@ export interface BriefLink {
   storage_path: string | null; // set when the file was uploaded to Storage
   updated_at: string;
 }
+
+// --- Olivia review loop (additive tables) ---
+
+export type ReviewStatus = "pending" | "approved" | "rejected";
+export type ReviewKind = "image" | "loom" | "link";
+
+export interface ReviewAsset {
+  id: number;
+  product_id: number;
+  asset_slot_id: number;
+  kind: ReviewKind;
+  title: string;
+  url: string;
+  storage_path: string | null;
+  review_status: ReviewStatus;
+  review_reason: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReviewComment {
+  id: number;
+  review_asset_id: number;
+  author: string | null;
+  body: string;
+  created_at: string;
+}

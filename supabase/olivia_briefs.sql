@@ -108,7 +108,59 @@ create policy "brief-assets update" on storage.objects
 create policy "brief-assets delete" on storage.objects
   for delete to anon, authenticated using (bucket_id = 'brief-assets');
 
+-- ========== 7. OLIVIA REVIEW LOOP (per-shot deliverables) ==========
+-- Olivia uploads finished assets (images) or adds Loom / links per shot, and
+-- the KadyLuxe side approves or rejects (with a reason) and leaves comments.
+create table if not exists review_assets (
+  id            bigint generated always as identity primary key,
+  product_id    bigint not null references products(id)   on delete cascade,
+  asset_slot_id bigint not null references asset_slots(id) on delete cascade,
+  kind          text not null default 'image',   -- image | loom | link
+  title         text not null default '',
+  url           text not null,
+  storage_path  text,                            -- set when uploaded to Storage
+  review_status text not null default 'pending', -- pending | approved | rejected
+  review_reason text,                            -- why rejected / approval note
+  reviewed_by   text,
+  reviewed_at   timestamptz,
+  created_by    text,                            -- who uploaded (KadyLuxe|Olivia)
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+create index if not exists idx_review_assets_product on review_assets(product_id);
+
+create table if not exists review_comments (
+  id              bigint generated always as identity primary key,
+  review_asset_id bigint not null references review_assets(id) on delete cascade,
+  author          text,
+  body            text not null,
+  created_at      timestamptz not null default now()
+);
+create index if not exists idx_review_comments_asset on review_comments(review_asset_id);
+
+grant all on table review_assets   to anon, authenticated;
+grant all on table review_comments to anon, authenticated;
+
+-- Separate public bucket for Olivia's uploaded deliverables.
+insert into storage.buckets (id, name, public)
+values ('review-assets', 'review-assets', true)
+on conflict (id) do nothing;
+
+drop policy if exists "review-assets read"   on storage.objects;
+drop policy if exists "review-assets insert" on storage.objects;
+drop policy if exists "review-assets update" on storage.objects;
+drop policy if exists "review-assets delete" on storage.objects;
+
+create policy "review-assets read" on storage.objects
+  for select to anon, authenticated using (bucket_id = 'review-assets');
+create policy "review-assets insert" on storage.objects
+  for insert to anon, authenticated with check (bucket_id = 'review-assets');
+create policy "review-assets update" on storage.objects
+  for update to anon, authenticated using (bucket_id = 'review-assets');
+create policy "review-assets delete" on storage.objects
+  for delete to anon, authenticated using (bucket_id = 'review-assets');
+
 -- =====================================================================
--- DONE. Open the app's "Briefs" page to fill in model / environment / styling
--- notes, manage links, and upload images per style.
+-- DONE. "Briefs" page = briefs + styling links/images. "Reviews" page =
+-- Olivia's uploaded deliverables with approve / reject / comments per shot.
 -- =====================================================================

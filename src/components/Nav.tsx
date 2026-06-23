@@ -4,7 +4,7 @@ import Link from "next/link";
 export function Nav({
   active,
 }: {
-  active: "tracker" | "settings" | "briefs";
+  active: "tracker" | "settings" | "briefs" | "reviews";
 }) {
   const linkCls = (on: boolean) =>
     `font-mono text-[10px] uppercase tracking-[0.08em] px-2.5 py-1 rounded border ${
@@ -23,6 +23,9 @@ export function Nav({
       </Link>
       <Link href="/briefs" className={linkCls(active === "briefs")}>
         Briefs
+      </Link>
+      <Link href="/reviews" className={linkCls(active === "reviews")}>
+        Reviews
       </Link>
     </div>
   );
