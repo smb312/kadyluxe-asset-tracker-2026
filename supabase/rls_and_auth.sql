@@ -20,9 +20,12 @@ create table if not exists allowlist (
 );
 
 -- >>> EDIT THIS LIST: add every teammate who should have access. <<<
+-- To add someone later, add a line here and re-run this file (safe), or just
+-- run:  insert into allowlist (email) values ('new@person.com');
 insert into allowlist (email) values
-  ('scott@growwithcoast.com')
-  -- ,('teammate@kadyluxe.com')
+  ('eric@growwithcoast.com'),
+  ('scott@growwithcoast.com'),
+  ('kady@kadyluxe.com')
 on conflict (email) do nothing;
 
 -- Helper: is the CURRENT authenticated user on the allowlist?
