@@ -17,8 +17,10 @@ defined in `KL_Tracker_schema.sql` — it does not recreate it.
 - **Live dashboard** — % ready tiles for PDP, Paid Social, and UGC.
 - **Filters / sort** — search, style, phase, has-gaps/complete, click-to-sort.
 - **Requirements editor** (`/settings`) — toggle which slots each style needs.
-- **Auth + RLS** — Supabase email magic-link, restricted to an email allowlist,
-  with Row-Level Security policies in the database.
+
+> **Access:** this app is intentionally open — no login. Anyone with the URL can
+> view and edit. It's an internal tool with nothing sensitive. To add logins +
+> a team allowlist later, ask Claude to "add auth back."
 
 ## Run it locally
 1. Install deps:
@@ -31,27 +33,20 @@ defined in `KL_Tracker_schema.sql` — it does not recreate it.
    ```
    - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` — from
      Supabase → Project Settings → API.
-   - `ALLOWED_EMAILS` — comma-separated team emails allowed to sign in.
-   - `NEXT_PUBLIC_SITE_URL` — `http://localhost:3000` for local dev.
-3. Apply the security layer once (Supabase SQL editor): paste and run
-   `supabase/rls_and_auth.sql`. Edit the allowlist insert to include your team.
-4. In Supabase → Authentication → URL Configuration, add
-   `http://localhost:3000/**` (and your Vercel URL) to the redirect allow-list.
-5. Start the dev server:
+3. Start the dev server:
    ```bash
    npm run dev
    ```
-   Open http://localhost:3000, enter an allowlisted email, and click the magic
-   link.
+   Open http://localhost:3000.
 
 ## Deploy (Vercel)
-Set the same four env vars in the Vercel project settings, set
-`NEXT_PUBLIC_SITE_URL` to your production URL, and add that URL to Supabase Auth
-redirect settings.
+Set the two `NEXT_PUBLIC_SUPABASE_*` env vars in the Vercel project settings and
+deploy. That's it.
 
-## Security summary
-- The app sends magic links **only** to allowlisted emails; middleware blocks
-  any session whose email isn't allowlisted.
-- `supabase/rls_and_auth.sql` enables RLS on every table so the anon key alone
-  reads/writes nothing; only authenticated, allowlisted users can read/write.
+## Notes on access
+- There is no auth. The Supabase anon key ships to the browser (by design), and
+  the seeded database has RLS disabled, so the app reads/writes openly.
+- `supabase/public_access.sql` is **optional** — only run it if you want to
+  silence Supabase's "RLS disabled" dashboard warning while keeping the app
+  fully public.
 - `.env.local` is gitignored — never commit real keys.

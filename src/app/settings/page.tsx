@@ -1,17 +1,13 @@
-import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { isAllowed } from "@/lib/allowlist";
 import { Nav } from "@/components/Nav";
 import { RequirementsEditor } from "@/components/RequirementsEditor";
 import type { AssetSlot, Style } from "@/lib/types";
 
+export const dynamic = "force-dynamic";
+
 export default async function SettingsPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user || !isAllowed(user.email)) redirect("/login");
 
   const [stylesRes, slotsRes] = await Promise.all([
     supabase.from("styles").select("*").order("style_number"),
@@ -38,7 +34,7 @@ export default async function SettingsPage() {
               Requirements Editor
             </h1>
           </div>
-          <Nav email={user.email ?? ""} active="settings" />
+          <Nav active="settings" />
         </div>
       </header>
 

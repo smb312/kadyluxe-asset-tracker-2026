@@ -26,13 +26,7 @@ const PHASE_ORDER = ["Phase 1", "Phase 2", "Backlog"];
 
 type SortCol = "priority" | "team" | "style_name" | "msrp";
 
-export function Tracker({
-  data,
-  userEmail,
-}: {
-  data: TrackerData;
-  userEmail: string;
-}) {
+export function Tracker({ data }: { data: TrackerData }) {
   const { products, slots, requirements, collections } = data;
   const store = useAssetStore(data.productAssets, data.collectionAssets);
   const supabase = useMemo(() => createClient(), []);
@@ -281,7 +275,7 @@ export function Tracker({
               Asset Readiness
             </h1>
           </div>
-          <Nav email={userEmail} active="tracker" />
+          <Nav active="tracker" />
         </div>
         <Dashboard stats={stats} />
       </header>
