@@ -370,7 +370,11 @@ insert into products (team, style_number, dtc_ovg_units, dtc_ovg_msrp, msrp_flag
   ('Texas Longhorns', 2524, 0, 0, false, 'Backlog'),
   ('Utah Utes', 2550, 0, 0, false, 'Backlog'),
   ('Wyoming Cowboys', 2521, 0, 0, false, 'Backlog'),
-  ('Wyoming Cowboys', 2550, 0, 0, false, 'Backlog')
+  ('Wyoming Cowboys', 2550, 0, 0, false, 'Backlog'),
+  -- Non-licensed color colorways of the Reversible Faux Fur Vest (2606).
+  ('Blue', 2606, null, null, false, 'Backlog'),
+  ('Oxblood', 2606, null, null, false, 'Backlog'),
+  ('Burnt Orange', 2606, null, null, false, 'Backlog')
 on conflict (team, style_number) do nothing;
 
 -- ========== 5. DEFAULT REQUIREMENTS ==========
