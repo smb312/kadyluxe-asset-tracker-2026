@@ -135,6 +135,18 @@ export function BriefsEditor({
   });
   const [uploading, setUploading] = useState(false);
   const [assetTeam, setAssetTeam] = useState(""); // "" = all teams
+  const [newTeam, setNewTeam] = useState("");
+
+  // Teams (= products) are editable in-app, so keep them in local state seeded
+  // from the server prop.
+  const [teamsMap, setTeamsMap] = useState<Record<number, StyleTeam[]>>(() => {
+    const m: Record<number, StyleTeam[]> = {};
+    for (const k of Object.keys(teamsByStyle)) {
+      const n = Number(k);
+      m[n] = [...teamsByStyle[n]];
+    }
+    return m;
+  });
 
   const BUCKET = "brief-assets";
   const isImageLink = (l: BriefLink) =>
@@ -160,7 +172,7 @@ export function BriefsEditor({
   }, [requirements, slotsById]);
 
   const brief = briefMap[styleNumber] ?? emptyBrief(styleNumber);
-  const teamList = teamsByStyle[styleNumber] ?? [];
+  const teamList = teamsMap[styleNumber] ?? [];
   const teams = teamList.map((t) => t.team);
   const style = styles.find((s) => s.style_number === styleNumber);
   const styleName = style?.name ?? "";
@@ -205,6 +217,122 @@ export function BriefsEditor({
     );
     if (error) setErr(error.message);
     else setMsg("Team detail saved.");
+  }
+
+  // ── Team (= product) management, by style ──────────────────────────────
+  async function addTeam() {
+    const name = newTeam.trim();
+    if (!name) return;
+    if (teamList.some((t) => t.team.toLowerCase() === name.toLowerCase())) {
+      setErr(`“${name}” is already a team on this style.`);
+      return;
+    }
+    setErr(null);
+    const { data, error } = await supabase
+      .from("products")
+      .insert({ team: name, style_number: styleNumber, phase: "Backlog" })
+      .select("id, team")
+      .single();
+    if (error || !data) {
+      setErr(error?.message ?? "Could not add team.");
+      return;
+    }
+    setTeamsMap((m) => ({
+      ...m,
+      [styleNumber]: [
+        ...(m[styleNumber] ?? []),
+        { product_id: data.id as number, team: data.team as string },
+      ],
+    }));
+    setNewTeam("");
+    setMsg(`Added team “${name}”.`);
+  }
+
+  async function renameTeam(productId: number, current: string, next: string) {
+    const name = next.trim();
+    if (!name || name === current) return;
+    if (
+      teamList.some(
+        (t) =>
+          t.product_id !== productId &&
+          t.team.toLowerCase() === name.toLowerCase(),
+      )
+    ) {
+      setErr(`“${name}” is already a team on this style.`);
+      return;
+    }
+    setErr(null);
+    const { error } = await supabase
+      .from("products")
+      .update({ team: name })
+      .eq("id", productId);
+    if (error) {
+      setErr(error.message);
+      return;
+    }
+    // Keep asset tags that referenced the old team name in sync.
+    await supabase
+      .from("brief_links")
+      .update({ team: name })
+      .eq("style_number", styleNumber)
+      .eq("team", current);
+    setTeamsMap((m) => ({
+      ...m,
+      [styleNumber]: (m[styleNumber] ?? []).map((t) =>
+        t.product_id === productId ? { ...t, team: name } : t,
+      ),
+    }));
+    setLinkList((l) =>
+      l.map((x) =>
+        x.style_number === styleNumber && x.team === current
+          ? { ...x, team: name }
+          : x,
+      ),
+    );
+    setMsg(`Renamed to “${name}”.`);
+  }
+
+  async function deleteTeam(productId: number, name: string) {
+    if (
+      !window.confirm(
+        `Delete team “${name}” from this style?\n\nThis also removes its per-team brief details and any review assets uploaded for it. This can’t be undone.`,
+      )
+    )
+      return;
+    setErr(null);
+    const { error } = await supabase
+      .from("products")
+      .delete()
+      .eq("id", productId);
+    if (error) {
+      setErr(error.message);
+      return;
+    }
+    // Assets tagged to this team become shared (team = null) rather than orphaned.
+    await supabase
+      .from("brief_links")
+      .update({ team: null })
+      .eq("style_number", styleNumber)
+      .eq("team", name);
+    setTeamsMap((m) => ({
+      ...m,
+      [styleNumber]: (m[styleNumber] ?? []).filter(
+        (t) => t.product_id !== productId,
+      ),
+    }));
+    setLinkList((l) =>
+      l.map((x) =>
+        x.style_number === styleNumber && x.team === name
+          ? { ...x, team: null }
+          : x,
+      ),
+    );
+    setPbMap((m) => {
+      const n = { ...m };
+      delete n[productId];
+      return n;
+    });
+    setMsg(`Deleted team “${name}”.`);
   }
 
   function setField(field: keyof StyleBrief, value: string) {
@@ -427,10 +555,10 @@ export function BriefsEditor({
         const linkCount = linkList.filter(
           (l) => l.style_number === s.style_number,
         ).length;
-        const teamCount = (teamsByStyle[s.style_number] ?? []).length;
+        const teamCount = (teamsMap[s.style_number] ?? []).length;
         return { s, status, filled, linkCount, teamCount };
       }),
-    [styles, briefMap, linkList, teamsByStyle],
+    [styles, briefMap, linkList, teamsMap],
   );
 
   const counts = useMemo(() => {
@@ -827,12 +955,35 @@ export function BriefsEditor({
         {tab === "teams" && (
           <div>
             <p className="text-sm text-muted mb-3">
-              One card per team running this style. Leave a field blank to
-              inherit the default from the <b>Brief</b> tab.
+              One card per team running this style. Rename a team inline, delete
+              one you don’t need, or add a new colorway / team below. Leave an
+              override blank to inherit the default from the <b>Brief</b> tab.
             </p>
+
+            {/* Add a team */}
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
+              <input
+                value={newTeam}
+                onChange={(e) => setNewTeam(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addTeam()}
+                placeholder="New team / colorway (e.g. Blue)"
+                className="text-sm px-2.5 py-1.5 border border-line rounded bg-white
+                  focus:outline-none focus:border-gold min-w-[220px]"
+              />
+              <button
+                type="button"
+                disabled={!newTeam.trim()}
+                onClick={addTeam}
+                className="font-mono text-[10px] uppercase tracking-[0.06em] px-3 py-1.5
+                  rounded bg-ink text-white disabled:opacity-40"
+              >
+                + Add team
+              </button>
+            </div>
+
             {teamList.length === 0 ? (
               <div className="border border-line rounded-lg bg-white p-6 text-center text-sm text-muted">
-                No teams run this style yet.
+                No teams run this style yet. Add the first one above.
               </div>
             ) : (
               <div className="grid md:grid-cols-2 gap-4">
@@ -842,12 +993,31 @@ export function BriefsEditor({
                     className="border border-line rounded-lg bg-white p-3"
                   >
                     <div className="flex items-center gap-2 mb-3">
-                      <span className="font-disp uppercase font-bold text-base">
-                        {t.team}
+                      <input
+                        key={`${t.product_id}|${t.team}`}
+                        defaultValue={t.team}
+                        onBlur={(e) =>
+                          renameTeam(t.product_id, t.team, e.target.value)
+                        }
+                        onKeyDown={(e) =>
+                          e.key === "Enter" &&
+                          (e.target as HTMLInputElement).blur()
+                        }
+                        title="Rename team"
+                        className="font-disp uppercase font-bold text-base bg-transparent flex-1 min-w-0
+                          border-b border-transparent hover:border-line focus:border-gold focus:outline-none"
+                      />
+                      <span className="font-mono text-[9px] uppercase text-muted border border-line rounded px-1.5 py-0.5 shrink-0">
+                        #{t.product_id}
                       </span>
-                      <span className="font-mono text-[9px] uppercase text-muted border border-line rounded px-1.5 py-0.5">
-                        product #{t.product_id}
-                      </span>
+                      <button
+                        type="button"
+                        onClick={() => deleteTeam(t.product_id, t.team)}
+                        title="Delete team"
+                        className="text-muted hover:text-bad shrink-0"
+                      >
+                        🗑
+                      </button>
                     </div>
                     <div className="space-y-3">
                       <OverrideField
