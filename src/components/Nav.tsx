@@ -4,7 +4,7 @@ import Link from "next/link";
 export function Nav({
   active,
 }: {
-  active: "tracker" | "settings" | "briefs" | "reviews";
+  active: "tracker" | "hub" | "settings" | "briefs" | "reviews";
 }) {
   const linkCls = (on: boolean) =>
     `font-mono text-[10px] uppercase tracking-[0.08em] px-2.5 py-1 rounded border ${
@@ -17,6 +17,9 @@ export function Nav({
     <div className="flex items-center gap-2">
       <Link href="/" className={linkCls(active === "tracker")}>
         Tracker
+      </Link>
+      <Link href="/hub" className={linkCls(active === "hub")}>
+        All SKUs
       </Link>
       <Link href="/settings" className={linkCls(active === "settings")}>
         Requirements
