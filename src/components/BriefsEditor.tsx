@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type {
@@ -133,6 +133,14 @@ export function BriefsEditor({
     for (const pb of productBriefs) m[pb.product_id] = pb;
     return m;
   });
+  // Always-fresh mirrors of the maps so blur-time saves never read stale state.
+  const pbMapRef = useRef(pbMap);
+  pbMapRef.current = pbMap;
+  const briefMapRef = useRef(briefMap);
+  briefMapRef.current = briefMap;
+  // Per-team save status for inline feedback.
+  const [savingTeam, setSavingTeam] = useState<number | null>(null);
+  const [savedTeam, setSavedTeam] = useState<number | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -204,14 +212,30 @@ export function BriefsEditor({
     field: keyof ProductBrief,
     value: string,
   ) {
+    // Read from the updater's own state (m) so rapid edits across fields/teams
+    // never clobber each other.
     setPbMap((m) => ({
       ...m,
-      [productId]: { ...pbOf(productId), [field]: value },
+      [productId]: {
+        ...(m[productId] ?? emptyProductBrief(productId)),
+        [field]: value,
+      },
     }));
   }
 
-  async function savePb(productId: number) {
-    const cur = pbOf(productId);
+  // Saves a team's overrides. The just-blurred field's value is passed in
+  // explicitly and merged over the freshest state, so the last keystroke is
+  // never lost to a stale closure.
+  async function savePb(
+    productId: number,
+    field?: keyof ProductBrief,
+    value?: string,
+  ) {
+    const base = pbMapRef.current[productId] ?? emptyProductBrief(productId);
+    const cur =
+      field !== undefined ? { ...base, [field]: value ?? "" } : base;
+    setSavingTeam(productId);
+    setSavedTeam(null);
     setErr(null);
     const { error } = await supabase.from("product_briefs").upsert(
       {
@@ -224,8 +248,17 @@ export function BriefsEditor({
       },
       { onConflict: "product_id" },
     );
-    if (error) setErr(error.message);
-    else setMsg("Team detail saved.");
+    setSavingTeam(null);
+    if (error) {
+      setSavedTeam(null);
+      setErr(
+        `Couldn't save this team's brief: ${error.message}. ` +
+          `If this mentions row-level security, run supabase/public_access_briefs.sql once.`,
+      );
+    } else {
+      setSavedTeam(productId);
+      setMsg("Team detail saved.");
+    }
   }
 
   // ── Team (= product) management, by style ──────────────────────────────
@@ -356,7 +389,7 @@ export function BriefsEditor({
 
   async function saveBrief(next?: Partial<StyleBrief>) {
     const current = {
-      ...(briefMap[styleNumber] ?? emptyBrief(styleNumber)),
+      ...(briefMapRef.current[styleNumber] ?? emptyBrief(styleNumber)),
       ...next,
     };
     setErr(null);
@@ -1047,6 +1080,15 @@ export function BriefsEditor({
                       <span className="font-mono text-[9px] uppercase text-muted border border-line rounded px-1.5 py-0.5 shrink-0">
                         #{t.product_id}
                       </span>
+                      {savingTeam === t.product_id ? (
+                        <span className="font-mono text-[9px] uppercase text-muted shrink-0">
+                          saving…
+                        </span>
+                      ) : savedTeam === t.product_id ? (
+                        <span className="font-mono text-[9px] uppercase text-ok shrink-0">
+                          saved ✓
+                        </span>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => deleteTeam(t.product_id, t.team)}
@@ -1066,7 +1108,9 @@ export function BriefsEditor({
                         onChange={(v) =>
                           setPbField(t.product_id, "model_notes", v)
                         }
-                        onBlur={() => savePb(t.product_id)}
+                        onBlur={(v) =>
+                          savePb(t.product_id, "model_notes", v)
+                        }
                       />
                       <OverrideField
                         label="Lifestyle environment"
@@ -1078,7 +1122,9 @@ export function BriefsEditor({
                         onChange={(v) =>
                           setPbField(t.product_id, "lifestyle_environment", v)
                         }
-                        onBlur={() => savePb(t.product_id)}
+                        onBlur={(v) =>
+                          savePb(t.product_id, "lifestyle_environment", v)
+                        }
                       />
                       <OverrideField
                         label="Styling (optional)"
@@ -1090,7 +1136,9 @@ export function BriefsEditor({
                         onChange={(v) =>
                           setPbField(t.product_id, "model_styling_notes", v)
                         }
-                        onBlur={() => savePb(t.product_id)}
+                        onBlur={(v) =>
+                          savePb(t.product_id, "model_styling_notes", v)
+                        }
                       />
                     </div>
                   </div>
@@ -1538,7 +1586,7 @@ function OverrideField({
   def: string;
   value: string;
   onChange: (v: string) => void;
-  onBlur: () => void;
+  onBlur: (v: string) => void;
 }) {
   const overriding = value.trim().length > 0;
   return (
@@ -1562,7 +1610,7 @@ function OverrideField({
         value={value}
         placeholder={def.trim() ? `Inherit: ${def.trim()}` : "(none set)"}
         onChange={(e) => onChange(e.target.value)}
-        onBlur={onBlur}
+        onBlur={(e) => onBlur(e.target.value)}
         className="w-full text-[12px] px-2 py-1.5 border border-line rounded
           focus:outline-none focus:border-gold resize-y"
       />
